@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -112,10 +111,16 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
         action, _ := msg["action"].(string)
         payload, _ := msg["payload"].(map[string]interface{})
 
-        if action == "SYNC_CODE" {
-            targetSocketId, _ := payload["socketId"].(string)
-            code, _ := payload["code"].(string)
+        // --- Get sender info (Read Locked) ---
+        roomsMutex.RLock()
+        senderClient := rooms[roomId][conn]
+        roomsMutex.RUnlock()
+        // --- End of Locked section ---
 
+        switch action {
+        case "WEBRTC_OFFER", "WEBRTC_ANSWER", "WEBRTC_ICE_CANDIDATE":
+            targetSocketId, _ := payload["socketId"].(string)
+            
             // --- Find target connection (Read Locked) ---
             roomsMutex.RLock()
             var targetConn *websocket.Conn
@@ -128,16 +133,33 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
             roomsMutex.RUnlock()
             // --- End of Locked section ---
 
-            // Send code to the target client (No lock needed)
+            // Relay the message to the target client (No lock needed)
             if targetConn != nil {
+                payload["fromSocketId"] = senderClient.SocketId
                 targetConn.WriteJSON(map[string]interface{}{
-                    "action": "CODE_CHANGE",
-                    "payload": map[string]interface{}{
-                        "code": code,
-                    },
+                    "action":  action,
+                    "payload": payload,
                 })
             }
-        } else {
+
+        case "USER_SPEAKING", "USER_STOPPED_SPEAKING":
+            // --- Get connections to notify (Read Locked) ---
+            roomsMutex.RLock()
+            var connsToNotifyMsg []*websocket.Conn
+            for c := range rooms[roomId] {
+                if c != conn { // Don't send back to sender
+                    connsToNotifyMsg = append(connsToNotifyMsg, c)
+                }
+            }
+            roomsMutex.RUnlock()
+            // --- End of Locked section ---
+
+            // Broadcast message (No lock needed)
+            for _, c := range connsToNotifyMsg {
+                c.WriteJSON(map[string]interface{}{"action": action, "payload": payload})
+            }
+
+        default:
             // --- Get connections to notify (Read Locked) ---
             roomsMutex.RLock()
             var connsToNotifyMsg []*websocket.Conn
