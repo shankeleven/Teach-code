@@ -22,6 +22,83 @@ export default function EditorPage() {
     const username = searchParams.get('username');
     const roomId = params.roomId;
 
+    const createPeerConnection = (targetSocketId, isCaller) => {
+        const pc = new RTCPeerConnection();
+
+        if (window.localStream) {
+            window.localStream.getTracks().forEach(track => {
+                pc.addTrack(track, window.localStream);
+            });
+        }
+
+        pc.ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            audioStreams.current[targetSocketId] = remoteStream;
+            let audioEl = document.getElementById(`audio-${targetSocketId}`);
+            if (!audioEl) {
+                audioEl = document.createElement('audio');
+                audioEl.id = `audio-${targetSocketId}`;
+                audioEl.autoplay = true;
+                document.body.appendChild(audioEl);
+            }
+            audioEl.srcObject = remoteStream;
+        };
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                socketRef.current.send(JSON.stringify({
+                    action: 'WEBRTC_ICE_CANDIDATE',
+                    payload: {
+                        socketId: targetSocketId,
+                        candidate: event.candidate,
+                    },
+                }));
+            }
+        };
+
+        if (isCaller) {
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .then(() => {
+                    socketRef.current.send(JSON.stringify({
+                        action: 'WEBRTC_OFFER',
+                        payload: {
+                            socketId: targetSocketId,
+                            sdp: pc.localDescription,
+                        },
+                    }));
+                });
+        }
+
+        peerConnections.current[targetSocketId] = pc;
+        return pc;
+    };
+
+    const handleOffer = async (payload) => {
+        const { fromSocketId, sdp } = payload;
+        const pc = createPeerConnection(fromSocketId, false); // isCaller = false
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socketRef.current.send(JSON.stringify({
+            action: 'WEBRTC_ANSWER',
+            payload: {
+                socketId: fromSocketId,
+                sdp: pc.localDescription,
+            },
+        }));
+    };
+
+    const handleAnswer = async (payload) => {
+        const { fromSocketId, sdp } = payload;
+        await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
+    };
+
+    const handleIceCandidate = async (payload) => {
+        const { fromSocketId, candidate } = payload;
+        await peerConnections.current[fromSocketId].addIceCandidate(new RTCIceCandidate(candidate));
+    };
+
     useEffect(() => {
         const init = async () => {
             socketRef.current = new WebSocket(`ws://localhost:5000/ws?roomId=${roomId}&username=${username}`);
@@ -39,16 +116,17 @@ export default function EditorPage() {
                         break;
                     case 'USER_JOINED':
                         setClients(payload.clients);
-                        // For each new user, create a new peer connection
-                        payload.clients.forEach(client => {
-                            if (client.socketId !== selfSocketId.current && !peerConnections.current[client.socketId]) {
-                                setupPeerConnection(client.socketId);
-                            }
-                        });
+                        // Only the new user initiates the connection
+                        if (payload.socketId === selfSocketId.current) {
+                            payload.clients.forEach(client => {
+                                if (client.socketId !== selfSocketId.current) {
+                                    createPeerConnection(client.socketId, true); // isCaller = true
+                                }
+                            });
+                        }
                         break;
                     case 'USER_LEFT':
                         console.log(`${payload.username} left`);
-                        // Close peer connection and remove audio element
                         if (peerConnections.current[payload.socketId]) {
                             peerConnections.current[payload.socketId].close();
                             delete peerConnections.current[payload.socketId];
@@ -77,11 +155,9 @@ export default function EditorPage() {
                         await handleIceCandidate(payload);
                         break;
                     case 'USER_SPEAKING':
-                        // Add speaking indicator
                         setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: true } : c));
                         break;
                     case 'USER_STOPPED_SPEAKING':
-                        // Remove speaking indicator
                         setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: false } : c));
                         break;
                 }
@@ -93,89 +169,12 @@ export default function EditorPage() {
             if (socketRef.current) {
                 socketRef.current.close();
             }
-            // Clean up peer connections and audio streams
             Object.values(peerConnections.current).forEach(pc => pc.close());
             if (window.localStream) {
                 window.localStream.getTracks().forEach(track => track.stop());
             }
         };
     }, [roomId, username]);
-
-    const setupPeerConnection = (targetSocketId) => {
-        peerConnections.current[targetSocketId] = new RTCPeerConnection();
-
-        // Add local audio stream to the peer connection
-        if (window.localStream) {
-            window.localStream.getTracks().forEach(track => {
-                peerConnections.current[targetSocketId].addTrack(track, window.localStream);
-            });
-        }
-
-        // Handle incoming tracks
-        peerConnections.current[targetSocketId].ontrack = (event) => {
-            const remoteStream = event.streams[0];
-            audioStreams.current[targetSocketId] = remoteStream;
-            let audioEl = document.getElementById(`audio-${targetSocketId}`);
-            if (!audioEl) {
-                audioEl = document.createElement('audio');
-                audioEl.id = `audio-${targetSocketId}`;
-                audioEl.autoplay = true;
-                document.body.appendChild(audioEl);
-            }
-            audioEl.srcObject = remoteStream;
-        };
-
-        // Handle ICE candidates
-        peerConnections.current[targetSocketId].onicecandidate = (event) => {
-            if (event.candidate) {
-                socketRef.current.send(JSON.stringify({
-                    action: 'WEBRTC_ICE_CANDIDATE',
-                    payload: {
-                        socketId: targetSocketId,
-                        candidate: event.candidate,
-                    },
-                }));
-            }
-        };
-
-        // Create and send offer
-        peerConnections.current[targetSocketId].createOffer()
-            .then(offer => peerConnections.current[targetSocketId].setLocalDescription(offer))
-            .then(() => {
-                socketRef.current.send(JSON.stringify({
-                    action: 'WEBRTC_OFFER',
-                    payload: {
-                        socketId: targetSocketId,
-                        sdp: peerConnections.current[targetSocketId].localDescription,
-                    },
-                }));
-            });
-    };
-
-    const handleOffer = async (payload) => {
-        const { fromSocketId, sdp } = payload;
-        setupPeerConnection(fromSocketId);
-        await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
-        const answer = await peerConnections.current[fromSocketId].createAnswer();
-        await peerConnections.current[fromSocketId].setLocalDescription(answer);
-        socketRef.current.send(JSON.stringify({
-            action: 'WEBRTC_ANSWER',
-            payload: {
-                socketId: fromSocketId,
-                sdp: peerConnections.current[fromSocketId].localDescription,
-            },
-        }));
-    };
-
-    const handleAnswer = async (payload) => {
-        const { fromSocketId, sdp } = payload;
-        await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
-    };
-
-    const handleIceCandidate = async (payload) => {
-        const { fromSocketId, candidate } = payload;
-        await peerConnections.current[fromSocketId].addIceCandidate(new RTCIceCandidate(candidate));
-    };
 
     const toggleMute = async () => {
         if (typeof window === 'undefined' || !navigator.mediaDevices) {
@@ -198,7 +197,6 @@ export default function EditorPage() {
                         socketRef.current.send(JSON.stringify({ action: 'USER_STOPPED_SPEAKING', payload: { socketId: selfSocketId.current } }));
                     }
                 });
-                // Add stream to all existing peer connections
                 Object.values(peerConnections.current).forEach(pc => {
                     stream.getTracks().forEach(track => pc.addTrack(track, stream));
                 });
