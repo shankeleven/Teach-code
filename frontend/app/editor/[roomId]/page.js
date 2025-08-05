@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -96,7 +95,9 @@ export default function EditorPage() {
             }
             // Clean up peer connections and audio streams
             Object.values(peerConnections.current).forEach(pc => pc.close());
-            Object.values(audioStreams.current).forEach(stream => stream.getTracks().forEach(track => track.stop()));
+            if (window.localStream) {
+                window.localStream.getTracks().forEach(track => track.stop());
+            }
         };
     }, [roomId, username]);
 
@@ -177,24 +178,40 @@ export default function EditorPage() {
     };
 
     const toggleMute = async () => {
-        if (isMuted) {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            window.localStream = stream;
-            const speechEvents = hark(stream, {});
-            speechEvents.on('speaking', () => {
-                socketRef.current.send(JSON.stringify({ action: 'USER_SPEAKING', payload: { socketId: selfSocketId.current } }));
-            });
-            speechEvents.on('stopped_speaking', () => {
-                socketRef.current.send(JSON.stringify({ action: 'USER_STOPPED_SPEAKING', payload: { socketId: selfSocketId.current } }));
-            });
-            // Add stream to all existing peer connections
-            Object.values(peerConnections.current).forEach(pc => {
-                stream.getTracks().forEach(track => pc.addTrack(track, stream));
-            });
-        } else {
-            window.localStream.getTracks().forEach(track => track.stop());
+        if (typeof window === 'undefined' || !navigator.mediaDevices) {
+            console.error("MediaDevices API not supported.");
+            return;
         }
-        setIsMuted(!isMuted);
+
+        if (isMuted) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                window.localStream = stream;
+                const speechEvents = hark(stream, {});
+                speechEvents.on('speaking', () => {
+                    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                        socketRef.current.send(JSON.stringify({ action: 'USER_SPEAKING', payload: { socketId: selfSocketId.current } }));
+                    }
+                });
+                speechEvents.on('stopped_speaking', () => {
+                    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                        socketRef.current.send(JSON.stringify({ action: 'USER_STOPPED_SPEAKING', payload: { socketId: selfSocketId.current } }));
+                    }
+                });
+                // Add stream to all existing peer connections
+                Object.values(peerConnections.current).forEach(pc => {
+                    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                });
+                setIsMuted(false);
+            } catch (err) {
+                console.error("Error accessing microphone:", err);
+            }
+        } else {
+            if (window.localStream) {
+                window.localStream.getTracks().forEach(track => track.stop());
+            }
+            setIsMuted(true);
+        }
     };
 
     const onCodeChange = (newCode) => {
