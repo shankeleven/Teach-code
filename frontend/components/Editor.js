@@ -15,11 +15,11 @@ import { githubDark } from '@uiw/codemirror-theme-github';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { xcodeDark } from '@uiw/codemirror-theme-xcode';
 
-const themes = { 
-    dracula, 
-    github: githubDark, 
-    vscode: vscodeDark, 
-    xcode: xcodeDark 
+const themes = {
+    dracula,
+    github: githubDark,
+    vscode: vscodeDark,
+    xcode: xcodeDark
 };
 const languages = { javascript, python, go, cpp, java: javaLang, html, css };
 
