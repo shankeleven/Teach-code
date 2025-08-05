@@ -1,18 +1,23 @@
+
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useParams } from 'next/navigation';
 import Editor from '../../../components/Editor';
 import Client from '../../../components/Client';
+import hark from 'hark';
 
 export default function EditorPage() {
     const [clients, setClients] = useState([]);
     const [code, setCode] = useState('');
     const [theme, setTheme] = useState('dracula');
     const [language, setLanguage] = useState('javascript');
+    const [isMuted, setIsMuted] = useState(true);
     const socketRef = useRef(null);
     const codeRef = useRef(null);
     const selfSocketId = useRef(null);
+    const peerConnections = useRef({});
+    const audioStreams = useRef({});
     const searchParams = useSearchParams();
     const params = useParams();
     const username = searchParams.get('username');
@@ -26,7 +31,7 @@ export default function EditorPage() {
                 console.log('Connected to WebSocket');
             };
 
-            socketRef.current.onmessage = (event) => {
+            socketRef.current.onmessage = async (event) => {
                 const { action, payload } = JSON.parse(event.data);
 
                 switch (action) {
@@ -35,52 +40,165 @@ export default function EditorPage() {
                         break;
                     case 'USER_JOINED':
                         setClients(payload.clients);
-                        // A new user has joined, if it's not me, I'll send them my code
-                        if (payload.socketId !== selfSocketId.current) {
-                            console.log(`${payload.username} joined`);
-                            // Send code to the new user
-                            socketRef.current.send(JSON.stringify({
-                                action: 'SYNC_CODE',
-                                payload: {
-                                    code: codeRef.current,
-                                    socketId: payload.socketId,
-                                },
-                            }));
-                        }
+                        // For each new user, create a new peer connection
+                        payload.clients.forEach(client => {
+                            if (client.socketId !== selfSocketId.current && !peerConnections.current[client.socketId]) {
+                                setupPeerConnection(client.socketId);
+                            }
+                        });
                         break;
                     case 'USER_LEFT':
                         console.log(`${payload.username} left`);
+                        // Close peer connection and remove audio element
+                        if (peerConnections.current[payload.socketId]) {
+                            peerConnections.current[payload.socketId].close();
+                            delete peerConnections.current[payload.socketId];
+                        }
+                        if (audioStreams.current[payload.socketId]) {
+                            const audioEl = document.getElementById(`audio-${payload.socketId}`);
+                            if (audioEl) audioEl.remove();
+                            delete audioStreams.current[payload.socketId];
+                        }
                         setClients(payload.clients);
                         break;
                     case 'CODE_CHANGE':
-                        // Update our local state and ref
                         setCode(payload.code);
                         codeRef.current = payload.code;
                         break;
                     case 'LANGUAGE_CHANGE':
                         setLanguage(payload.language);
                         break;
+                    case 'WEBRTC_OFFER':
+                        await handleOffer(payload);
+                        break;
+                    case 'WEBRTC_ANSWER':
+                        await handleAnswer(payload);
+                        break;
+                    case 'WEBRTC_ICE_CANDIDATE':
+                        await handleIceCandidate(payload);
+                        break;
+                    case 'USER_SPEAKING':
+                        // Add speaking indicator
+                        setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: true } : c));
+                        break;
+                    case 'USER_STOPPED_SPEAKING':
+                        // Remove speaking indicator
+                        setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: false } : c));
+                        break;
                 }
             };
         };
         init();
 
-        // Cleanup on component unmount
         return () => {
             if (socketRef.current) {
                 socketRef.current.close();
             }
+            // Clean up peer connections and audio streams
+            Object.values(peerConnections.current).forEach(pc => pc.close());
+            Object.values(audioStreams.current).forEach(stream => stream.getTracks().forEach(track => track.stop()));
         };
-        // This effect should only run once on mount
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [roomId, username]);
+
+    const setupPeerConnection = (targetSocketId) => {
+        peerConnections.current[targetSocketId] = new RTCPeerConnection();
+
+        // Add local audio stream to the peer connection
+        if (window.localStream) {
+            window.localStream.getTracks().forEach(track => {
+                peerConnections.current[targetSocketId].addTrack(track, window.localStream);
+            });
+        }
+
+        // Handle incoming tracks
+        peerConnections.current[targetSocketId].ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            audioStreams.current[targetSocketId] = remoteStream;
+            let audioEl = document.getElementById(`audio-${targetSocketId}`);
+            if (!audioEl) {
+                audioEl = document.createElement('audio');
+                audioEl.id = `audio-${targetSocketId}`;
+                audioEl.autoplay = true;
+                document.body.appendChild(audioEl);
+            }
+            audioEl.srcObject = remoteStream;
+        };
+
+        // Handle ICE candidates
+        peerConnections.current[targetSocketId].onicecandidate = (event) => {
+            if (event.candidate) {
+                socketRef.current.send(JSON.stringify({
+                    action: 'WEBRTC_ICE_CANDIDATE',
+                    payload: {
+                        socketId: targetSocketId,
+                        candidate: event.candidate,
+                    },
+                }));
+            }
+        };
+
+        // Create and send offer
+        peerConnections.current[targetSocketId].createOffer()
+            .then(offer => peerConnections.current[targetSocketId].setLocalDescription(offer))
+            .then(() => {
+                socketRef.current.send(JSON.stringify({
+                    action: 'WEBRTC_OFFER',
+                    payload: {
+                        socketId: targetSocketId,
+                        sdp: peerConnections.current[targetSocketId].localDescription,
+                    },
+                }));
+            });
+    };
+
+    const handleOffer = async (payload) => {
+        const { fromSocketId, sdp } = payload;
+        setupPeerConnection(fromSocketId);
+        await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await peerConnections.current[fromSocketId].createAnswer();
+        await peerConnections.current[fromSocketId].setLocalDescription(answer);
+        socketRef.current.send(JSON.stringify({
+            action: 'WEBRTC_ANSWER',
+            payload: {
+                socketId: fromSocketId,
+                sdp: peerConnections.current[fromSocketId].localDescription,
+            },
+        }));
+    };
+
+    const handleAnswer = async (payload) => {
+        const { fromSocketId, sdp } = payload;
+        await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
+    };
+
+    const handleIceCandidate = async (payload) => {
+        const { fromSocketId, candidate } = payload;
+        await peerConnections.current[fromSocketId].addIceCandidate(new RTCIceCandidate(candidate));
+    };
+
+    const toggleMute = async () => {
+        if (isMuted) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            window.localStream = stream;
+            const speechEvents = hark(stream, {});
+            speechEvents.on('speaking', () => {
+                socketRef.current.send(JSON.stringify({ action: 'USER_SPEAKING', payload: { socketId: selfSocketId.current } }));
+            });
+            speechEvents.on('stopped_speaking', () => {
+                socketRef.current.send(JSON.stringify({ action: 'USER_STOPPED_SPEAKING', payload: { socketId: selfSocketId.current } }));
+            });
+            // Add stream to all existing peer connections
+            Object.values(peerConnections.current).forEach(pc => {
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            });
+        } else {
+            window.localStream.getTracks().forEach(track => track.stop());
+        }
+        setIsMuted(!isMuted);
+    };
 
     const onCodeChange = (newCode) => {
-        // Update our own editor state immediately
-        setCode(newCode);
-        // Keep the ref updated
         codeRef.current = newCode;
-        // Send the change to the server
         if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
             socketRef.current.send(JSON.stringify({
                 action: 'CODE_CHANGE',
@@ -124,6 +242,7 @@ export default function EditorPage() {
                             <Client
                                 key={client.socketId}
                                 username={client.username}
+                                speaking={client.speaking}
                             />
                         ))}
                     </div>
@@ -149,6 +268,9 @@ export default function EditorPage() {
                         <option value="css">CSS</option>
                     </select>
                 </div>
+                <button className="btn micBtn" onClick={toggleMute}>
+                    {isMuted ? 'Mic Off' : 'Mic On'}
+                </button>
                 <button className="btn copyBtn" onClick={copyRoomId}>
                     Copy ROOM ID
                 </button>

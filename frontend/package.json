@@ -21,6 +21,7 @@
     "@uiw/codemirror-theme-vscode": "^4.24.2",
     "@uiw/codemirror-theme-xcode": "^4.24.2",
     "@uiw/react-codemirror": "^4.24.2",
+    "hark": "^1.2.3",
     "next": "15.4.5",
     "react": "19.1.0",
     "react-avatar": "^5.0.4",
