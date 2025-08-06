@@ -1,37 +1,65 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Pen, Eraser, Square, Circle, Type, Undo, Redo, Download, Users, Trash2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  Pen,
+  Eraser,
+  Square,
+  Circle,
+  Type,
+  Undo,
+  Redo,
+  Download,
+  Users,
+  Trash2,
+} from "lucide-react";
 
 const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   const canvasRef = useRef(null);
-  const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState('#ffffff');
+  const [tool, setTool] = useState("pen");
+  const [color, setColor] = useState("#ffffff");
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [elements, setElements] = useState([]);
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [currentPath, setCurrentPath] = useState('');
+  const [currentPath, setCurrentPath] = useState("");
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [connectedUsers, setConnectedUsers] = useState(3);
-  const [textInput, setTextInput] = useState({ active: false, x: 0, y: 0, value: '' });
+  const [textInput, setTextInput] = useState({
+    active: false,
+    x: 0,
+    y: 0,
+    value: "",
+  });
 
   // Generate unique ID for elements
-  const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+  const generateId = () =>
+    Date.now().toString(36) + Math.random().toString(36).substr(2);
 
   // Add element to canvas
-  const addElement = useCallback((element) => {
-    setElements(prev => {
-      const newElements = [...prev, { ...element, id: element.id || generateId() }];
-      // Add to history for undo/redo
-      setHistory(prevHistory => [...prevHistory.slice(0, historyIndex + 1), newElements]);
-      setHistoryIndex(prev => prev + 1);
-      return newElements;
-    });
-  }, [historyIndex]);
+  const addElement = useCallback(
+    (element) => {
+      setElements((prev) => {
+        const newElements = [
+          ...prev,
+          { ...element, id: element.id || generateId() },
+        ];
+        // Add to history for undo/redo
+        setHistory((prevHistory) => [
+          ...prevHistory.slice(0, historyIndex + 1),
+          newElements,
+        ]);
+        setHistoryIndex((prev) => prev + 1);
+        return newElements;
+      });
+    },
+    [historyIndex]
+  );
 
   // Update existing element
   const updateElement = useCallback((id, updates) => {
-    setElements(prev => prev.map(el => el.id === id ? { ...el, ...updates } : el));
+    setElements((prev) =>
+      prev.map((el) => (el.id === id ? { ...el, ...updates } : el))
+    );
   }, []);
 
   // Get mouse position relative to canvas
@@ -39,103 +67,114 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
     const rect = canvasRef.current.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      y: e.clientY - rect.top,
     };
   }, []);
 
   // Handle mouse down
-  const handleMouseDown = useCallback((e) => {
-    const pos = getMousePos(e);
-    setIsDrawing(true);
-    setStartPos(pos);
+  const handleMouseDown = useCallback(
+    (e) => {
+      const pos = getMousePos(e);
+      setIsDrawing(true);
+      setStartPos(pos);
 
-    if (tool === 'pen') {
-      setCurrentPath(`M${pos.x},${pos.y}`);
-      addElement({
-        type: 'path',
-        path: `M${pos.x},${pos.y}`,
-        stroke: color,
-        strokeWidth,
-        fill: 'none'
-      });
-    } else if (tool === 'text') {
-      setTextInput({ active: true, x: pos.x, y: pos.y, value: '' });
-    }
-  }, [tool, color, strokeWidth, getMousePos, addElement]);
+      if (tool === "pen") {
+        setCurrentPath(`M${pos.x},${pos.y}`);
+        addElement({
+          type: "path",
+          path: `M${pos.x},${pos.y}`,
+          stroke: color,
+          strokeWidth,
+          fill: "none",
+        });
+      } else if (tool === "text") {
+        setTextInput({ active: true, x: pos.x, y: pos.y, value: "" });
+      }
+    },
+    [tool, color, strokeWidth, getMousePos, addElement]
+  );
 
   // Handle mouse move
-  const handleMouseMove = useCallback((e) => {
-    if (!isDrawing) return;
+  const handleMouseMove = useCallback(
+    (e) => {
+      if (!isDrawing) return;
 
-    const pos = getMousePos(e);
+      const pos = getMousePos(e);
 
-    if (tool === 'pen') {
-      const newPath = currentPath + ` L${pos.x},${pos.y}`;
-      setCurrentPath(newPath);
+      if (tool === "pen") {
+        const newPath = currentPath + ` L${pos.x},${pos.y}`;
+        setCurrentPath(newPath);
 
-      // Update the last element
-      setElements(prev => {
-        const newElements = [...prev];
-        if (newElements.length > 0) {
-          newElements[newElements.length - 1].path = newPath;
-        }
-        return newElements;
-      });
-    }
-  }, [isDrawing, tool, currentPath, getMousePos]);
+        // Update the last element
+        setElements((prev) => {
+          const newElements = [...prev];
+          if (newElements.length > 0) {
+            newElements[newElements.length - 1].path = newPath;
+          }
+          return newElements;
+        });
+      }
+    },
+    [isDrawing, tool, currentPath, getMousePos]
+  );
 
   // Handle mouse up
-  const handleMouseUp = useCallback((e) => {
-    if (!isDrawing) return;
+  const handleMouseUp = useCallback(
+    (e) => {
+      if (!isDrawing) return;
 
-    const pos = getMousePos(e);
-    setIsDrawing(false);
+      const pos = getMousePos(e);
+      setIsDrawing(false);
 
-    if (tool === 'rectangle') {
-      addElement({
-        type: 'rect',
-        x: Math.min(startPos.x, pos.x),
-        y: Math.min(startPos.y, pos.y),
-        width: Math.abs(pos.x - startPos.x),
-        height: Math.abs(pos.y - startPos.y),
-        stroke: color,
-        strokeWidth,
-        fill: 'none'
-      });
-    } else if (tool === 'circle') {
-      const radius = Math.sqrt(Math.pow(pos.x - startPos.x, 2) + Math.pow(pos.y - startPos.y, 2));
-      addElement({
-        type: 'circle',
-        cx: startPos.x,
-        cy: startPos.y,
-        r: radius,
-        stroke: color,
-        strokeWidth,
-        fill: 'none'
-      });
-    }
-  }, [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement]);
+      if (tool === "rectangle") {
+        addElement({
+          type: "rect",
+          x: Math.min(startPos.x, pos.x),
+          y: Math.min(startPos.y, pos.y),
+          width: Math.abs(pos.x - startPos.x),
+          height: Math.abs(pos.y - startPos.y),
+          stroke: color,
+          strokeWidth,
+          fill: "none",
+        });
+      } else if (tool === "circle") {
+        const radius = Math.sqrt(
+          Math.pow(pos.x - startPos.x, 2) + Math.pow(pos.y - startPos.y, 2)
+        );
+        addElement({
+          type: "circle",
+          cx: startPos.x,
+          cy: startPos.y,
+          r: radius,
+          stroke: color,
+          strokeWidth,
+          fill: "none",
+        });
+      }
+    },
+    [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement]
+  );
 
   // Handle text input
   const handleTextSubmit = () => {
     if (textInput.value.trim()) {
       addElement({
-        type: 'text',
+        type: "text",
         x: textInput.x,
         y: textInput.y,
         text: textInput.value,
         fill: color,
         fontSize: 16,
-        fontFamily: 'Arial, sans-serif'
+        fontFamily: "Arial, sans-serif",
       });
     }
-    setTextInput({ active: false, x: 0, y: 0, value: '' });
+    setTextInput({ active: false, x: 0, y: 0, value: "" });
   };
 
   // Undo functionality
   const undo = () => {
     if (historyIndex > 0) {
-      setHistoryIndex(prev => prev - 1);
+      setHistoryIndex((prev) => prev - 1);
       setElements(history[historyIndex - 1]);
     }
   };
@@ -143,7 +182,7 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   // Redo functionality
   const redo = () => {
     if (historyIndex < history.length - 1) {
-      setHistoryIndex(prev => prev + 1);
+      setHistoryIndex((prev) => prev + 1);
       setElements(history[historyIndex + 1]);
     }
   };
@@ -157,20 +196,22 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
 
   // Generate SVG string for storage/export
   const generateSVG = () => {
-    const svgElements = elements.map(el => {
-      switch (el.type) {
-        case 'path':
-          return `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
-        case 'rect':
-          return `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
-        case 'circle':
-          return `<circle cx="${el.cx}" cy="${el.cy}" r="${el.r}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
-        case 'text':
-          return `<text x="${el.x}" y="${el.y}" fill="${el.fill}" font-size="${el.fontSize}" font-family="${el.fontFamily}">${el.text}</text>`;
-        default:
-          return '';
-      }
-    }).join('\n    ');
+    const svgElements = elements
+      .map((el) => {
+        switch (el.type) {
+          case "path":
+            return `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+          case "rect":
+            return `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+          case "circle":
+            return `<circle cx="${el.cx}" cy="${el.cy}" r="${el.r}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+          case "text":
+            return `<text x="${el.x}" y="${el.y}" fill="${el.fill}" font-size="${el.fontSize}" font-family="${el.fontFamily}">${el.text}</text>`;
+          default:
+            return "";
+        }
+      })
+      .join("\n    ");
 
     return `<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
     ${svgElements}
@@ -180,9 +221,9 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   // Download SVG
   const downloadSVG = () => {
     const svgContent = generateSVG();
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    const blob = new Blob([svgContent], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `whiteboard-${roomId}.svg`;
     document.body.appendChild(a);
@@ -192,40 +233,55 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   };
 
   const lastReceivedElements = useRef(null);
+  const isReceivingUpdate = useRef(false);
 
   useEffect(() => {
     if (!socketRef.current) return;
 
     const handleSocketMessage = (event) => {
-        const { action, payload } = JSON.parse(event.data);
+      const { action, payload } = JSON.parse(event.data);
 
-        if (action === 'WHITEBOARD_DRAW') {
-            lastReceivedElements.current = payload.elements;
-            setElements(payload.elements);
-        }
+      if (action === "WHITEBOARD_DRAW") {
+        isReceivingUpdate.current = true;
+        lastReceivedElements.current = payload.elements;
+        setElements(payload.elements);
+        // Reset the flag after state update
+        setTimeout(() => {
+          isReceivingUpdate.current = false;
+        }, 0);
+      }
     };
 
-    socketRef.current.addEventListener('message', handleSocketMessage);
+    socketRef.current.addEventListener("message", handleSocketMessage);
 
     return () => {
-        socketRef.current.removeEventListener('message', handleSocketMessage);
+      if (socketRef.current) {
+        socketRef.current.removeEventListener("message", handleSocketMessage);
+      }
     };
-}, [socketRef.current]);
+  }, []);
 
   useEffect(() => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && elements !== lastReceivedElements.current) {
-        socketRef.current.send(JSON.stringify({
-            action: 'WHITEBOARD_DRAW',
-            payload: { elements },
-        }));
+    if (
+      socketRef.current &&
+      socketRef.current.readyState === WebSocket.OPEN &&
+      !isReceivingUpdate.current &&
+      elements !== lastReceivedElements.current
+    ) {
+      socketRef.current.send(
+        JSON.stringify({
+          action: "WHITEBOARD_DRAW",
+          payload: { elements },
+        })
+      );
     }
-}, [elements, socketRef.current]);
+  }, [elements]);
 
   // Render SVG elements
   const renderElements = () => {
-    return elements.map(el => {
+    return elements.map((el) => {
       switch (el.type) {
-        case 'path':
+        case "path":
           return (
             <path
               key={el.id}
@@ -237,7 +293,7 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
               strokeLinejoin="round"
             />
           );
-        case 'rect':
+        case "rect":
           return (
             <rect
               key={el.id}
@@ -250,7 +306,7 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
               fill={el.fill}
             />
           );
-        case 'circle':
+        case "circle":
           return (
             <circle
               key={el.id}
@@ -262,7 +318,7 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
               fill={el.fill}
             />
           );
-        case 'text':
+        case "text":
           return (
             <text
               key={el.id}
@@ -286,7 +342,9 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
       {/* Header */}
       <div className="bg-gray-800 shadow-md p-4 flex items-center justify-between border-b border-gray-700">
         <div className="flex items-center space-x-4">
-          <h1 className="text-xl font-bold text-white">Collaborative Whiteboard</h1>
+          <h1 className="text-xl font-bold text-white">
+            Collaborative Whiteboard
+          </h1>
           <div className="flex items-center space-x-2 text-sm text-gray-300">
             <Users size={16} />
             <span>{connectedUsers} users</span>
@@ -302,17 +360,19 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
         {/* Tools */}
         <div className="flex items-center space-x-2 border-r border-gray-600 pr-4">
           {[
-            { name: 'pen', icon: Pen, label: 'Pen' },
-            { name: 'rectangle', icon: Square, label: 'Rectangle' },
-            { name: 'circle', icon: Circle, label: 'Circle' },
-            { name: 'text', icon: Type, label: 'Text' },
-            { name: 'eraser', icon: Eraser, label: 'Eraser' }
+            { name: "pen", icon: Pen, label: "Pen" },
+            { name: "rectangle", icon: Square, label: "Rectangle" },
+            { name: "circle", icon: Circle, label: "Circle" },
+            { name: "text", icon: Type, label: "Text" },
+            { name: "eraser", icon: Eraser, label: "Eraser" },
           ].map(({ name, icon: Icon, label }) => (
             <button
               key={name}
               onClick={() => setTool(name)}
               className={`p-2 rounded ${
-                tool === name ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                tool === name
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-300 hover:bg-gray-700"
               }`}
               title={label}
             >
@@ -393,8 +453,18 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
         >
           {/* Grid pattern */}
           <defs>
-            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#374151" strokeWidth="0.5"/>
+            <pattern
+              id="grid"
+              width="20"
+              height="20"
+              patternUnits="userSpaceOnUse"
+            >
+              <path
+                d="M 20 0 L 0 0 0 20"
+                fill="none"
+                stroke="#374151"
+                strokeWidth="0.5"
+              />
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
@@ -412,8 +482,10 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
             <input
               type="text"
               value={textInput.value}
-              onChange={(e) => setTextInput(prev => ({ ...prev, value: e.target.value }))}
-              onKeyPress={(e) => e.key === 'Enter' && handleTextSubmit()}
+              onChange={(e) =>
+                setTextInput((prev) => ({ ...prev, value: e.target.value }))
+              }
+              onKeyPress={(e) => e.key === "Enter" && handleTextSubmit()}
               onBlur={handleTextSubmit}
               autoFocus
               className="border border-gray-600 px-2 py-1 text-sm bg-gray-700 text-white placeholder-gray-400"
