@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Pen, Eraser, Square, Circle, Type, Undo, Redo, Download, Users, Trash2 } from 'lucide-react';
 
-const CollaborativeWhiteboard = () => {
+const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   const canvasRef = useRef(null);
   const [tool, setTool] = useState('pen');
   const [color, setColor] = useState('#ffffff');
@@ -12,7 +12,6 @@ const CollaborativeWhiteboard = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState('');
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [roomId, setRoomId] = useState('room-123');
   const [connectedUsers, setConnectedUsers] = useState(3);
   const [textInput, setTextInput] = useState({ active: false, x: 0, y: 0, value: '' });
 
@@ -192,17 +191,35 @@ const CollaborativeWhiteboard = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Simulate WebSocket connection for real-time collaboration
-  useEffect(() => {
-    // In a real implementation, you would:
-    // 1. Connect to WebSocket server with roomId
-    // 2. Listen for drawing events from other users
-    // 3. Send drawing events to other users
-    // 4. Load initial SVG state from server
+  const lastReceivedElements = useRef(null);
 
-    console.log('Connected to room:', roomId);
-    console.log('SVG for storage:', generateSVG());
-  }, [roomId, elements]);
+  useEffect(() => {
+    if (!socketRef.current) return;
+
+    const handleSocketMessage = (event) => {
+        const { action, payload } = JSON.parse(event.data);
+
+        if (action === 'WHITEBOARD_DRAW') {
+            lastReceivedElements.current = payload.elements;
+            setElements(payload.elements);
+        }
+    };
+
+    socketRef.current.addEventListener('message', handleSocketMessage);
+
+    return () => {
+        socketRef.current.removeEventListener('message', handleSocketMessage);
+    };
+}, [socketRef.current]);
+
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN && elements !== lastReceivedElements.current) {
+        socketRef.current.send(JSON.stringify({
+            action: 'WHITEBOARD_DRAW',
+            payload: { elements },
+        }));
+    }
+}, [elements, socketRef.current]);
 
   // Render SVG elements
   const renderElements = () => {
@@ -276,13 +293,7 @@ const CollaborativeWhiteboard = () => {
           </div>
         </div>
         <div className="flex items-center space-x-2">
-          <input
-            type="text"
-            placeholder="Room ID"
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            className="px-3 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white placeholder-gray-400"
-          />
+          <span className="text-sm text-gray-300">Room ID: {roomId}</span>
         </div>
       </div>
 

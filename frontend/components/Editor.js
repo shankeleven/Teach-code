@@ -32,15 +32,9 @@ export default function Editor({ socketRef, roomId, onCodeChange, code, theme, l
         }
     }, [language]);
 
-    const onChange = React.useCallback((value, viewUpdate) => {
-        onCodeChange(value);
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-                action: 'CODE_CHANGE',
-                code: value,
-            }));
-        }
-    }, [onCodeChange, socketRef]);
+    const handleChange = (newCode) => {
+        onCodeChange(newCode);
+    };
 
     return (
         <CodeMirror
@@ -48,7 +42,7 @@ export default function Editor({ socketRef, roomId, onCodeChange, code, theme, l
             height="100vh"
             theme={themes[theme]}
             extensions={extensions}
-            onChange={onChange}
+                        onChange={handleChange}
         />
     );
 }

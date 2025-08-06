@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useSearchParams, useParams } from 'next/navigation';
 import Editor from '../../../components/Editor';
 import Client from '../../../components/Client';
+import CollaborativeWhiteboard from '../../../components/Whiteboard.jsx';
 import hark from 'hark';
 
 export default function EditorPage() {
@@ -11,17 +12,21 @@ export default function EditorPage() {
     const [code, setCode] = useState('');
     const [theme, setTheme] = useState('dracula');
     const [language, setLanguage] = useState('javascript');
+    const [view, setView] = useState('editor');
     const [isMuted, setIsMuted] = useState(true);
+
     const socketRef = useRef(null);
     const codeRef = useRef(null);
     const selfSocketId = useRef(null);
     const peerConnections = useRef({});
     const audioStreams = useRef({});
+    
     const searchParams = useSearchParams();
     const params = useParams();
     const username = searchParams.get('username');
     const roomId = params.roomId;
 
+    // --- WebRTC Functions ---
     const createPeerConnection = (targetSocketId, isCaller) => {
         const pc = new RTCPeerConnection();
 
@@ -37,7 +42,7 @@ export default function EditorPage() {
             let audioEl = document.getElementById(`audio-${targetSocketId}`);
             if (!audioEl) {
                 audioEl = document.createElement('audio');
-                audioEl.id = `audio-${targetSocketId}`;
+                audioEl.id = `audio-${targetSocketId}';
                 audioEl.autoplay = true;
                 document.body.appendChild(audioEl);
             }
@@ -48,10 +53,7 @@ export default function EditorPage() {
             if (event.candidate) {
                 socketRef.current.send(JSON.stringify({
                     action: 'WEBRTC_ICE_CANDIDATE',
-                    payload: {
-                        socketId: targetSocketId,
-                        candidate: event.candidate,
-                    },
+                    payload: { socketId: targetSocketId, candidate: event.candidate },
                 }));
             }
         };
@@ -62,10 +64,7 @@ export default function EditorPage() {
                 .then(() => {
                     socketRef.current.send(JSON.stringify({
                         action: 'WEBRTC_OFFER',
-                        payload: {
-                            socketId: targetSocketId,
-                            sdp: pc.localDescription,
-                        },
+                        payload: { socketId: targetSocketId, sdp: pc.localDescription },
                     }));
                 });
         }
@@ -76,16 +75,13 @@ export default function EditorPage() {
 
     const handleOffer = async (payload) => {
         const { fromSocketId, sdp } = payload;
-        const pc = createPeerConnection(fromSocketId, false); // isCaller = false
+        const pc = createPeerConnection(fromSocketId, false);
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         socketRef.current.send(JSON.stringify({
             action: 'WEBRTC_ANSWER',
-            payload: {
-                socketId: fromSocketId,
-                sdp: pc.localDescription,
-            },
+            payload: { socketId: fromSocketId, sdp: pc.localDescription },
         }));
     };
 
@@ -99,72 +95,89 @@ export default function EditorPage() {
         await peerConnections.current[fromSocketId].addIceCandidate(new RTCIceCandidate(candidate));
     };
 
+    // --- WebSocket Connection ---
     useEffect(() => {
-        const init = async () => {
-            socketRef.current = new WebSocket(`ws://localhost:5000/ws?roomId=${roomId}&username=${username}`);
+        // Guard against connecting without necessary info
+        if (!roomId || !username) {
+            return;
+        }
 
-            socketRef.current.onopen = () => {
-                console.log('Connected to WebSocket');
-            };
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        // Use window.location.host to make it work in production
+        const wsUrl = `${protocol}://${window.location.host.replace(/\d+$/, '5000')}/ws?roomId=${roomId}&username=${username}`;
+        
+        socketRef.current = new WebSocket(wsUrl);
 
-            socketRef.current.onmessage = async (event) => {
-                const { action, payload } = JSON.parse(event.data);
-
-                switch (action) {
-                    case 'WELCOME':
-                        selfSocketId.current = payload.socketId;
-                        break;
-                    case 'USER_JOINED':
-                        setClients(payload.clients);
-                        // Only the new user initiates the connection
-                        if (payload.socketId === selfSocketId.current) {
-                            payload.clients.forEach(client => {
-                                if (client.socketId !== selfSocketId.current) {
-                                    createPeerConnection(client.socketId, true); // isCaller = true
-                                }
-                            });
-                        }
-                        break;
-                    case 'USER_LEFT':
-                        console.log(`${payload.username} left`);
-                        if (peerConnections.current[payload.socketId]) {
-                            peerConnections.current[payload.socketId].close();
-                            delete peerConnections.current[payload.socketId];
-                        }
-                        if (audioStreams.current[payload.socketId]) {
-                            const audioEl = document.getElementById(`audio-${payload.socketId}`);
-                            if (audioEl) audioEl.remove();
-                            delete audioStreams.current[payload.socketId];
-                        }
-                        setClients(payload.clients);
-                        break;
-                    case 'CODE_CHANGE':
-                        setCode(payload.code);
-                        codeRef.current = payload.code;
-                        break;
-                    case 'LANGUAGE_CHANGE':
-                        setLanguage(payload.language);
-                        break;
-                    case 'WEBRTC_OFFER':
-                        await handleOffer(payload);
-                        break;
-                    case 'WEBRTC_ANSWER':
-                        await handleAnswer(payload);
-                        break;
-                    case 'WEBRTC_ICE_CANDIDATE':
-                        await handleIceCandidate(payload);
-                        break;
-                    case 'USER_SPEAKING':
-                        setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: true } : c));
-                        break;
-                    case 'USER_STOPPED_SPEAKING':
-                        setClients(prevClients => prevClients.map(c => c.socketId === payload.socketId ? { ...c, speaking: false } : c));
-                        break;
-                }
-            };
+        socketRef.current.onopen = () => {
+            console.log('SUCCESS: WebSocket connection established.');
         };
-        init();
 
+        socketRef.current.onerror = (error) => {
+            console.error('ERROR: WebSocket connection failed:', error);
+        };
+
+        socketRef.current.onclose = () => {
+            console.log('INFO: WebSocket connection closed.');
+        };
+
+        socketRef.current.onmessage = (event) => {
+            const { action, payload } = JSON.parse(event.data);
+            console.log(`RECEIVED: action '${action}'`, payload);
+
+            switch (action) {
+                case 'WELCOME':
+                    selfSocketId.current = payload.socketId;
+                    break;
+                case 'USER_JOINED':
+                    setClients(payload.clients);
+                    if (payload.socketId === selfSocketId.current) {
+                        payload.clients.forEach(client => {
+                            if (client.socketId !== selfSocketId.current) {
+                                createPeerConnection(client.socketId, true);
+                            }
+                        });
+                    }
+                    break;
+                case 'USER_LEFT':
+                    if (peerConnections.current[payload.socketId]) {
+                        peerConnections.current[payload.socketId].close();
+                        delete peerConnections.current[payload.socketId];
+                    }
+                    if (audioStreams.current[payload.socketId]) {
+                        const audioEl = document.getElementById(`audio-${payload.socketId}`);
+                        if (audioEl) audioEl.remove();
+                        delete audioStreams.current[payload.socketId];
+                    }
+                    setClients(payload.clients);
+                    break;
+                case 'CODE_CHANGE':
+                    // Update the ref directly to avoid re-renders from CodeMirror
+                    codeRef.current = payload.code;
+                    setCode(payload.code);
+                    break;
+                case 'LANGUAGE_CHANGE':
+                    setLanguage(payload.language);
+                    break;
+                case 'WEBRTC_OFFER':
+                    handleOffer(payload);
+                    break;
+                case 'WEBRTC_ANSWER':
+                    handleAnswer(payload);
+                    break;
+                case 'WEBRTC_ICE_CANDIDATE':
+                    handleIceCandidate(payload);
+                    break;
+                case 'USER_SPEAKING':
+                    setClients(prev => prev.map(c => c.socketId === payload.socketId ? { ...c, speaking: true } : c));
+                    break;
+                case 'USER_STOPPED_SPEAKING':
+                    setClients(prev => prev.map(c => c.socketId === payload.socketId ? { ...c, speaking: false } : c));
+                    break;
+                // Whiteboard events are handled inside the component itself
+            }
+        };
+
+        // Cleanup on component unmount
         return () => {
             if (socketRef.current) {
                 socketRef.current.close();
@@ -176,12 +189,29 @@ export default function EditorPage() {
         };
     }, [roomId, username]);
 
-    const toggleMute = async () => {
-        if (typeof window === 'undefined' || !navigator.mediaDevices) {
-            console.error("MediaDevices API not supported.");
-            return;
+    // --- Action Handlers ---
+    const onCodeChange = (newCode) => {
+        // Only send if the socket is open and the change is new
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            console.log(`SENDING: action 'CODE_CHANGE'`);
+            socketRef.current.send(JSON.stringify({
+                action: 'CODE_CHANGE',
+                payload: { code: newCode },
+            }));
         }
+    };
 
+    const onLanguageChange = (newLanguage) => {
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            console.log(`SENDING: action 'LANGUAGE_CHANGE'`);
+            socketRef.current.send(JSON.stringify({
+                action: 'LANGUAGE_CHANGE',
+                payload: { language: newLanguage },
+            }));
+        }
+    };
+
+    const toggleMute = async () => {
         if (isMuted) {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -212,26 +242,6 @@ export default function EditorPage() {
         }
     };
 
-    const onCodeChange = (newCode) => {
-        codeRef.current = newCode;
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-                action: 'CODE_CHANGE',
-                payload: { code: newCode },
-            }));
-        }
-    };
-
-    const onLanguageChange = (newLanguage) => {
-        setLanguage(newLanguage);
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-                action: 'LANGUAGE_CHANGE',
-                payload: { language: newLanguage },
-            }));
-        }
-    };
-
     function copyRoomId() {
         navigator.clipboard.writeText(roomId);
     }
@@ -240,25 +250,22 @@ export default function EditorPage() {
         window.location.href = '/';
     }
 
+    // --- Render ---
+    if (!roomId || !username) {
+        return <div>Loading or invalid room...</div>;
+    }
+
     return (
         <div className="mainWrap">
             <div className="aside">
                 <div className="asideInner">
                     <div className="logo">
-                        <img
-                            className="logoImage"
-                            src="/code-sync.png"
-                            alt="logo"
-                        />
+                        <img className="logoImage" src="/code-sync.png" alt="logo" />
                     </div>
                     <h3>Connected</h3>
                     <div className="clientsList">
                         {clients.map((client) => (
-                            <Client
-                                key={client.socketId}
-                                username={client.username}
-                                speaking={client.speaking}
-                            />
+                            <Client key={client.socketId} username={client.username} speaking={client.speaking} />
                         ))}
                     </div>
                 </div>
@@ -283,25 +290,27 @@ export default function EditorPage() {
                         <option value="css">CSS</option>
                     </select>
                 </div>
-                <button className="btn micBtn" onClick={toggleMute}>
-                    {isMuted ? 'Mic Off' : 'Mic On'}
-                </button>
-                <button className="btn copyBtn" onClick={copyRoomId}>
-                    Copy ROOM ID
-                </button>
-                <button className="btn leaveBtn" onClick={leaveRoom}>
-                    Leave
-                </button>
+                <button className="btn micBtn" onClick={toggleMute}>{isMuted ? 'Mic Off' : 'Mic On'}</button>
+                <button className="btn copyBtn" onClick={copyRoomId}>Copy ROOM ID</button>
+                <button className="btn leaveBtn" onClick={leaveRoom}>Leave</button>
             </div>
             <div className="editorWrap">
-                <Editor
-                    socketRef={socketRef}
-                    roomId={roomId}
-                    onCodeChange={onCodeChange}
-                    code={code}
-                    theme={theme}
-                    language={language}
-                />
+                <div className="toggle-buttons">
+                    <button onClick={() => setView('editor')}>Editor</button>
+                    <button onClick={() => setView('whiteboard')}>Whiteboard</button>
+                </div>
+                {view === 'editor' ? (
+                    <Editor
+                        socketRef={socketRef}
+                        roomId={roomId}
+                        onCodeChange={onCodeChange}
+                        code={code}
+                        theme={theme}
+                        language={language}
+                    />
+                ) : (
+                    <CollaborativeWhiteboard socketRef={socketRef} roomId={roomId} />
+                )}
             </div>
         </div>
     );

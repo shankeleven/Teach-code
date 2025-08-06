@@ -50,6 +50,10 @@ io.on('connection', (socket) => {
         io.to(socketId).emit(ACTIONS.CODE_CHANGE, { code });
     });
 
+    socket.on('WHITEBOARD_DRAW', ({ elements }) => {
+        socket.in(roomId).emit('WHITEBOARD_DRAW', { elements });
+    });
+
     socket.on('disconnecting', () => {
         const rooms = [...socket.rooms];
         rooms.forEach((roomId) => {

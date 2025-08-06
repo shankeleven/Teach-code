@@ -111,6 +111,8 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
         action, _ := msg["action"].(string)
         payload, _ := msg["payload"].(map[string]interface{})
 
+        log.Printf("Received action '%s' in room %s", action, roomId)
+
         // --- Get sender info (Read Locked) ---
         roomsMutex.RLock()
         senderClient := rooms[roomId][conn]
@@ -147,14 +149,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
             roomsMutex.RLock()
             var connsToNotifyMsg []*websocket.Conn
             for c := range rooms[roomId] {
-                if c != conn { // Don't send back to sender
-                    connsToNotifyMsg = append(connsToNotifyMsg, c)
-                }
+                connsToNotifyMsg = append(connsToNotifyMsg, c)
             }
             roomsMutex.RUnlock()
             // --- End of Locked section ---
 
             // Broadcast message (No lock needed)
+            log.Printf("Broadcasting action '%s' to %d clients in room %s", action, len(connsToNotifyMsg), roomId)
             for _, c := range connsToNotifyMsg {
                 c.WriteJSON(map[string]interface{}{"action": action, "payload": payload})
             }
@@ -164,14 +165,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
             roomsMutex.RLock()
             var connsToNotifyMsg []*websocket.Conn
             for c := range rooms[roomId] {
-                if c != conn { // Don't send back to sender
-                    connsToNotifyMsg = append(connsToNotifyMsg, c)
-                }
+                connsToNotifyMsg = append(connsToNotifyMsg, c)
             }
             roomsMutex.RUnlock()
             // --- End of Locked section ---
 
             // Broadcast message (No lock needed)
+            log.Printf("Broadcasting action '%s' to %d clients in room %s", action, len(connsToNotifyMsg), roomId)
             for _, c := range connsToNotifyMsg {
                 c.WriteJSON(map[string]interface{}{"action": action, "payload": payload})
             }
