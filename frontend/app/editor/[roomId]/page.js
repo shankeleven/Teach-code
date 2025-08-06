@@ -15,6 +15,7 @@ export default function EditorPage() {
   const [view, setView] = useState("editor");
   const [isMuted, setIsMuted] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [whiteboardElements, setWhiteboardElements] = useState([]);
   const socketRef = useRef(null);
   const codeRef = useRef(null);
   const selfSocketId = useRef(null);
@@ -91,15 +92,19 @@ export default function EditorPage() {
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      socketRef.current.send(JSON.stringify({
-        action: 'WEBRTC_ANSWER',
-        payload: { socketId: fromSocketId, sdp: pc.localDescription },
-      }));
+      socketRef.current.send(
+        JSON.stringify({
+          action: "WEBRTC_ANSWER",
+          payload: { socketId: fromSocketId, sdp: pc.localDescription },
+        })
+      );
     };
 
     const handleAnswer = async (payload) => {
       const { fromSocketId, sdp } = payload;
-      await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
+      await peerConnections.current[fromSocketId].setRemoteDescription(
+        new RTCSessionDescription(sdp)
+      );
     };
 
     const handleIceCandidate = async (payload) => {
@@ -153,6 +158,9 @@ export default function EditorPage() {
             }
             if (payload.state.language) {
               setLanguage(payload.state.language);
+            }
+            if (payload.state.elements) {
+              setWhiteboardElements(payload.state.elements);
             }
           }
           // Mark as initialized after a short delay to prevent immediate overwrites
@@ -217,6 +225,9 @@ export default function EditorPage() {
             )
           );
           break;
+        case "WHITEBOARD_DRAW":
+          setWhiteboardElements(payload.elements);
+          break;
         // Whiteboard events are handled inside the component itself
       }
     };
@@ -279,6 +290,23 @@ export default function EditorPage() {
         JSON.stringify({
           action: "LANGUAGE_CHANGE",
           payload: { language: newLanguage },
+        })
+      );
+    }
+  };
+
+  const onWhiteboardChange = (newElements) => {
+    setWhiteboardElements(newElements);
+
+    // Only send WebSocket updates after initialization
+    if (!isInitialized) return;
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      console.log(`SENDING: action 'WHITEBOARD_DRAW'`);
+      socketRef.current.send(
+        JSON.stringify({
+          action: "WHITEBOARD_DRAW",
+          payload: { elements: newElements },
         })
       );
     }
@@ -418,7 +446,12 @@ export default function EditorPage() {
             language={language}
           />
         ) : (
-          <CollaborativeWhiteboard socketRef={socketRef} roomId={roomId} />
+          <CollaborativeWhiteboard
+            socketRef={socketRef}
+            roomId={roomId}
+            elements={whiteboardElements}
+            onElementsChange={onWhiteboardChange}
+          />
         )}
       </div>
     </div>

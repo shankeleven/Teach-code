@@ -12,12 +12,17 @@ import {
   Trash2,
 } from "lucide-react";
 
-const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
+const CollaborativeWhiteboard = ({
+  socketRef,
+  roomId,
+  elements,
+  onElementsChange,
+}) => {
   const canvasRef = useRef(null);
   const [tool, setTool] = useState("pen");
   const [color, setColor] = useState("#ffffff");
   const [strokeWidth, setStrokeWidth] = useState(2);
-  const [elements, setElements] = useState([]);
+  // Remove local elements state - use props instead
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -38,29 +43,31 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
   // Add element to canvas
   const addElement = useCallback(
     (element) => {
-      setElements((prev) => {
-        const newElements = [
-          ...prev,
-          { ...element, id: element.id || generateId() },
-        ];
-        // Add to history for undo/redo
-        setHistory((prevHistory) => [
-          ...prevHistory.slice(0, historyIndex + 1),
-          newElements,
-        ]);
-        setHistoryIndex((prev) => prev + 1);
-        return newElements;
-      });
+      const newElements = [
+        ...elements,
+        { ...element, id: element.id || generateId() },
+      ];
+      onElementsChange(newElements);
+      // Add to history for undo/redo
+      setHistory((prevHistory) => [
+        ...prevHistory.slice(0, historyIndex + 1),
+        newElements,
+      ]);
+      setHistoryIndex((prev) => prev + 1);
     },
-    [historyIndex]
+    [elements, onElementsChange, historyIndex]
   );
 
   // Update existing element
-  const updateElement = useCallback((id, updates) => {
-    setElements((prev) =>
-      prev.map((el) => (el.id === id ? { ...el, ...updates } : el))
-    );
-  }, []);
+  const updateElement = useCallback(
+    (id, updates) => {
+      const newElements = elements.map((el) =>
+        el.id === id ? { ...el, ...updates } : el
+      );
+      onElementsChange(newElements);
+    },
+    [elements, onElementsChange]
+  );
 
   // Get mouse position relative to canvas
   const getMousePos = useCallback((e) => {
@@ -106,13 +113,11 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
         setCurrentPath(newPath);
 
         // Update the last element
-        setElements((prev) => {
-          const newElements = [...prev];
-          if (newElements.length > 0) {
-            newElements[newElements.length - 1].path = newPath;
-          }
-          return newElements;
-        });
+        const newElements = [...elements];
+        if (newElements.length > 0) {
+          newElements[newElements.length - 1].path = newPath;
+          onElementsChange(newElements);
+        }
       }
     },
     [isDrawing, tool, currentPath, getMousePos]
@@ -171,25 +176,27 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
     setTextInput({ active: false, x: 0, y: 0, value: "" });
   };
 
-  // Undo functionality
-  const undo = () => {
+  // Undo last action
+  const undo = useCallback(() => {
     if (historyIndex > 0) {
       setHistoryIndex((prev) => prev - 1);
-      setElements(history[historyIndex - 1]);
+      const previousState = history[historyIndex - 1];
+      onElementsChange(previousState);
     }
-  };
+  }, [historyIndex, history, onElementsChange]);
 
-  // Redo functionality
-  const redo = () => {
+  // Redo action
+  const redo = useCallback(() => {
     if (historyIndex < history.length - 1) {
       setHistoryIndex((prev) => prev + 1);
-      setElements(history[historyIndex + 1]);
+      const nextState = history[historyIndex + 1];
+      onElementsChange(nextState);
     }
-  };
+  }, [historyIndex, history, onElementsChange]);
 
   // Clear canvas
   const clearCanvas = () => {
-    setElements([]);
+    onElementsChange([]);
     setHistory([[]]);
     setHistoryIndex(0);
   };
@@ -231,73 +238,6 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
-  const lastReceivedElements = useRef(null);
-  const isReceivingUpdate = useRef(false);
-  const hasInitialized = useRef(false);
-
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    const handleSocketMessage = (event) => {
-      const { action, payload } = JSON.parse(event.data);
-
-      if (action === "WELCOME" && payload.state && !hasInitialized.current) {
-        // Set initial whiteboard state (even if empty)
-        isReceivingUpdate.current = true;
-        const initialElements = payload.state.elements || [];
-        lastReceivedElements.current = initialElements;
-        setElements(initialElements);
-        hasInitialized.current = true;
-        console.log("Whiteboard initialized with elements:", initialElements);
-        setTimeout(() => {
-          isReceivingUpdate.current = false;
-        }, 0);
-      } else if (action === "WHITEBOARD_DRAW") {
-        isReceivingUpdate.current = true;
-        lastReceivedElements.current = payload.elements;
-        setElements(payload.elements);
-        console.log("Whiteboard updated with elements:", payload.elements);
-        // Reset the flag after state update
-        setTimeout(() => {
-          isReceivingUpdate.current = false;
-        }, 0);
-      }
-    };
-
-    socketRef.current.addEventListener("message", handleSocketMessage);
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.removeEventListener("message", handleSocketMessage);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (
-      socketRef.current &&
-      socketRef.current.readyState === WebSocket.OPEN &&
-      !isReceivingUpdate.current &&
-      hasInitialized.current && // Only send updates after initialization
-      elements !== lastReceivedElements.current
-    ) {
-      console.log("Sending whiteboard update:", elements);
-      socketRef.current.send(
-        JSON.stringify({
-          action: "WHITEBOARD_DRAW",
-          payload: { elements },
-        })
-      );
-    } else {
-      console.log("Whiteboard update blocked:", {
-        socketOpen: socketRef.current?.readyState === WebSocket.OPEN,
-        isReceivingUpdate: isReceivingUpdate.current,
-        hasInitialized: hasInitialized.current,
-        elementsChanged: elements !== lastReceivedElements.current,
-      });
-    }
-  }, [elements]);
 
   // Render SVG elements
   const renderElements = () => {
