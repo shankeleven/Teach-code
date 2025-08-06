@@ -22,8 +22,15 @@ type Client struct {
 	Username string `json:"username"`
 }
 
+type RoomState struct {
+	Code     string        `json:"code"`
+	Language string        `json:"language"`
+	Elements []interface{} `json:"elements"`
+}
+
 var (
 	rooms      = make(map[string]map[*websocket.Conn]Client)
+	roomStates = make(map[string]*RoomState)
 	roomsMutex = sync.RWMutex{}
 )
 
@@ -45,11 +52,19 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	if rooms[roomId] == nil {
 		rooms[roomId] = make(map[*websocket.Conn]Client)
 	}
+	if roomStates[roomId] == nil {
+		roomStates[roomId] = &RoomState{
+			Code:     "",
+			Language: "javascript",
+			Elements: []interface{}{},
+		}
+	}
 	rooms[roomId][conn] = Client{SocketId: socketId, Username: username}
 
 	// Get copies of data needed for broadcast
 	var connectionsToNotify []*websocket.Conn
 	var currentClients []Client
+	currentState := *roomStates[roomId] // Copy current state
 	for c, client := range rooms[roomId] {
 		connectionsToNotify = append(connectionsToNotify, c)
 		currentClients = append(currentClients, client)
@@ -57,10 +72,13 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	roomsMutex.Unlock()
 	// --- End of Locked section ---
 
-	// Welcome message to the new client (No lock needed)
+	// Welcome message to the new client with current state
 	conn.WriteJSON(map[string]interface{}{
-		"action":  "WELCOME",
-		"payload": map[string]interface{}{"socketId": socketId},
+		"action": "WELCOME",
+		"payload": map[string]interface{}{
+			"socketId": socketId,
+			"state":    currentState,
+		},
 	})
 
 	// Broadcast new user joined (No lock needed)
@@ -166,6 +184,29 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			}
 
 		default:
+			// Update room state for certain actions
+			roomsMutex.Lock()
+			switch action {
+			case "CODE_CHANGE":
+				if code, ok := payload["code"].(string); ok {
+					roomStates[roomId].Code = code
+					log.Printf("Updated room %s code length: %d", roomId, len(code))
+				}
+			case "LANGUAGE_CHANGE":
+				if language, ok := payload["language"].(string); ok {
+					roomStates[roomId].Language = language
+					log.Printf("Updated room %s language: %s", roomId, language)
+				}
+			case "WHITEBOARD_DRAW":
+				if elements, ok := payload["elements"].([]interface{}); ok {
+					roomStates[roomId].Elements = elements
+					log.Printf("Updated room %s whiteboard with %d elements", roomId, len(elements))
+				} else {
+					log.Printf("Failed to parse whiteboard elements for room %s: %T", roomId, payload["elements"])
+				}
+			}
+			roomsMutex.Unlock()
+
 			// --- Get connections to notify (Read Locked) ---
 			roomsMutex.RLock()
 			var connsToNotifyMsg []*websocket.Conn
@@ -190,19 +231,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		// Add CORS headers for WebSocket connections
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		handleConnections(w, r)
-	})
+	http.HandleFunc("/ws", handleConnections)
 
 	log.Println("http server started on :5000")
 	err := http.ListenAndServe(":5000", nil)

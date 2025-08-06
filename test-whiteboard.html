@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Whiteboard WebSocket Test</title>
+  </head>
+  <body>
+    <h1>Whiteboard WebSocket Test</h1>
+    <div id="status">Connecting...</div>
+    <button onclick="sendTestDraw()">Send Test Draw</button>
+    <div id="messages"></div>
+
+    <script>
+      const ws = new WebSocket(
+        "ws://localhost:5000/ws?roomId=test&username=testuser"
+      );
+      const statusDiv = document.getElementById("status");
+      const messagesDiv = document.getElementById("messages");
+
+      ws.onopen = function () {
+        statusDiv.textContent = "Connected!";
+        statusDiv.style.color = "green";
+      };
+
+      ws.onerror = function (error) {
+        statusDiv.textContent = "Connection Error: " + JSON.stringify(error);
+        statusDiv.style.color = "red";
+      };
+
+      ws.onclose = function () {
+        statusDiv.textContent = "Connection Closed";
+        statusDiv.style.color = "orange";
+      };
+
+      ws.onmessage = function (event) {
+        const message = JSON.parse(event.data);
+        const messageDiv = document.createElement("div");
+        messageDiv.textContent = `Received: ${
+          message.action
+        } - ${JSON.stringify(message.payload)}`;
+        messagesDiv.appendChild(messageDiv);
+
+        if (message.action === "WELCOME") {
+          console.log("Welcome state:", message.payload.state);
+        }
+      };
+
+      function sendTestDraw() {
+        const testElements = [
+          {
+            id: "test-1",
+            type: "path",
+            path: "M10,10 L50,50",
+            stroke: "#ffffff",
+            strokeWidth: 2,
+            fill: "none",
+          },
+        ];
+
+        ws.send(
+          JSON.stringify({
+            action: "WHITEBOARD_DRAW",
+            payload: { elements: testElements },
+          })
+        );
+
+        console.log("Sent test whiteboard draw:", testElements);
+      }
+    </script>
+  </body>
+</html>

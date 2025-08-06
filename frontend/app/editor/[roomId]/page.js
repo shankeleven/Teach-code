@@ -14,7 +14,7 @@ export default function EditorPage() {
   const [language, setLanguage] = useState("javascript");
   const [view, setView] = useState("editor");
   const [isMuted, setIsMuted] = useState(true);
-
+  const [isInitialized, setIsInitialized] = useState(false);
   const socketRef = useRef(null);
   const codeRef = useRef(null);
   const selfSocketId = useRef(null);
@@ -77,34 +77,6 @@ export default function EditorPage() {
     return pc;
   };
 
-  const handleOffer = async (payload) => {
-    const { fromSocketId, sdp } = payload;
-    const pc = createPeerConnection(fromSocketId, false);
-    await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    socketRef.current.send(
-      JSON.stringify({
-        action: "WEBRTC_ANSWER",
-        payload: { socketId: fromSocketId, sdp: pc.localDescription },
-      })
-    );
-  };
-
-  const handleAnswer = async (payload) => {
-    const { fromSocketId, sdp } = payload;
-    await peerConnections.current[fromSocketId].setRemoteDescription(
-      new RTCSessionDescription(sdp)
-    );
-  };
-
-  const handleIceCandidate = async (payload) => {
-    const { fromSocketId, candidate } = payload;
-    await peerConnections.current[fromSocketId].addIceCandidate(
-      new RTCIceCandidate(candidate)
-    );
-  };
-
   // --- WebSocket Connection ---
   useEffect(() => {
     // Guard against connecting without necessary info
@@ -112,13 +84,45 @@ export default function EditorPage() {
       return;
     }
 
+    // Define WebRTC handlers inside useEffect to avoid stale closures
+    const handleOffer = async (payload) => {
+      const { fromSocketId, sdp } = payload;
+      const pc = createPeerConnection(fromSocketId, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socketRef.current.send(JSON.stringify({
+        action: 'WEBRTC_ANSWER',
+        payload: { socketId: fromSocketId, sdp: pc.localDescription },
+      }));
+    };
+
+    const handleAnswer = async (payload) => {
+      const { fromSocketId, sdp } = payload;
+      await peerConnections.current[fromSocketId].setRemoteDescription(new RTCSessionDescription(sdp));
+    };
+
+    const handleIceCandidate = async (payload) => {
+      const { fromSocketId, candidate } = payload;
+      await peerConnections.current[fromSocketId].addIceCandidate(
+        new RTCIceCandidate(candidate)
+      );
+    };
+
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    // Use localhost in development, same host in production
-    const wsHost =
-      process.env.NODE_ENV === "development"
-        ? "localhost:5000"
-        : window.location.host;
+    // Check if we're in development by looking at the hostname and port
+    const isDevelopment =
+      window.location.hostname === "localhost" &&
+      window.location.port === "3000";
+    const wsHost = isDevelopment ? "localhost:5000" : window.location.host;
     const wsUrl = `${protocol}://${wsHost}/ws?roomId=${roomId}&username=${username}`;
+
+    console.log("WebSocket URL:", wsUrl);
+    console.log("Environment check:", {
+      hostname: window.location.hostname,
+      port: window.location.port,
+      isDevelopment,
+    });
 
     socketRef.current = new WebSocket(wsUrl);
 
@@ -141,6 +145,20 @@ export default function EditorPage() {
       switch (action) {
         case "WELCOME":
           selfSocketId.current = payload.socketId;
+          // Set initial state if provided
+          if (payload.state) {
+            if (payload.state.code) {
+              codeRef.current = payload.state.code;
+              setCode(payload.state.code);
+            }
+            if (payload.state.language) {
+              setLanguage(payload.state.language);
+            }
+          }
+          // Mark as initialized after a short delay to prevent immediate overwrites
+          setTimeout(() => {
+            setIsInitialized(true);
+          }, 500);
           break;
         case "USER_JOINED":
           setClients(payload.clients);
@@ -208,7 +226,9 @@ export default function EditorPage() {
       if (socketRef.current) {
         socketRef.current.close();
       }
-      Object.values(peerConnections.current).forEach((pc) => pc.close());
+      // Copy the ref to avoid stale closure issues
+      const currentConnections = peerConnections.current;
+      Object.values(currentConnections).forEach((pc) => pc.close());
       if (window.localStream) {
         window.localStream.getTracks().forEach((track) => track.stop());
       }
@@ -222,6 +242,9 @@ export default function EditorPage() {
     // Update local state immediately for responsive UI
     setCode(newCode);
     codeRef.current = newCode;
+
+    // Only send WebSocket updates after initialization
+    if (!isInitialized) return;
 
     // Debounce WebSocket sending to avoid spam
     if (debounceTimeoutRef.current) {
@@ -245,6 +268,11 @@ export default function EditorPage() {
   };
 
   const onLanguageChange = (newLanguage) => {
+    setLanguage(newLanguage);
+
+    // Only send WebSocket updates after initialization
+    if (!isInitialized) return;
+
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       console.log(`SENDING: action 'LANGUAGE_CHANGE'`);
       socketRef.current.send(

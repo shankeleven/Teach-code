@@ -234,6 +234,7 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
 
   const lastReceivedElements = useRef(null);
   const isReceivingUpdate = useRef(false);
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
     if (!socketRef.current) return;
@@ -241,10 +242,22 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
     const handleSocketMessage = (event) => {
       const { action, payload } = JSON.parse(event.data);
 
-      if (action === "WHITEBOARD_DRAW") {
+      if (action === "WELCOME" && payload.state && !hasInitialized.current) {
+        // Set initial whiteboard state (even if empty)
+        isReceivingUpdate.current = true;
+        const initialElements = payload.state.elements || [];
+        lastReceivedElements.current = initialElements;
+        setElements(initialElements);
+        hasInitialized.current = true;
+        console.log("Whiteboard initialized with elements:", initialElements);
+        setTimeout(() => {
+          isReceivingUpdate.current = false;
+        }, 0);
+      } else if (action === "WHITEBOARD_DRAW") {
         isReceivingUpdate.current = true;
         lastReceivedElements.current = payload.elements;
         setElements(payload.elements);
+        console.log("Whiteboard updated with elements:", payload.elements);
         // Reset the flag after state update
         setTimeout(() => {
           isReceivingUpdate.current = false;
@@ -266,14 +279,23 @@ const CollaborativeWhiteboard = ({ socketRef, roomId }) => {
       socketRef.current &&
       socketRef.current.readyState === WebSocket.OPEN &&
       !isReceivingUpdate.current &&
+      hasInitialized.current && // Only send updates after initialization
       elements !== lastReceivedElements.current
     ) {
+      console.log("Sending whiteboard update:", elements);
       socketRef.current.send(
         JSON.stringify({
           action: "WHITEBOARD_DRAW",
           payload: { elements },
         })
       );
+    } else {
+      console.log("Whiteboard update blocked:", {
+        socketOpen: socketRef.current?.readyState === WebSocket.OPEN,
+        isReceivingUpdate: isReceivingUpdate.current,
+        hasInitialized: hasInitialized.current,
+        elementsChanged: elements !== lastReceivedElements.current,
+      });
     }
   }, [elements]);
 

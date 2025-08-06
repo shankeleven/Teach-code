@@ -1,0 +1,8 @@
+nohup: ignoring input
+2025/08/07 02:03:12 http server started on :5000
+2025/08/07 02:03:51 Client testuser (6b9d3331-6d54-4c2c-8ecd-9a5016678162) connected to room test
+2025/08/07 02:03:51 Client testuser (6b9d3331-6d54-4c2c-8ecd-9a5016678162) disconnected from room test
+2025/08/07 02:06:33 Client shashank (89a13e1e-d852-4544-a3fe-1781496d6a00) connected to room ash
+2025/08/07 02:06:33 Client shashank (76fe15f2-84af-4dcd-86e1-5483b3f115b7) connected to room ash
+2025/08/07 02:06:33 Client shashank (89a13e1e-d852-4544-a3fe-1781496d6a00) disconnected from room ash
+2025/08/07 02:08:08 Client shashank (76fe15f2-84af-4dcd-86e1-5483b3f115b7) disconnected from room ash
