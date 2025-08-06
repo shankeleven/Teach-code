@@ -1,11 +1,10 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Pen, Eraser, Square, Circle, Type, Undo, Redo, Download, Users, Trash2 } from 'lucide-react';
 
 const CollaborativeWhiteboard = () => {
   const canvasRef = useRef(null);
   const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState('#000000');
+  const [color, setColor] = useState('#ffffff');
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [elements, setElements] = useState([]);
   const [history, setHistory] = useState([]);
@@ -266,12 +265,12 @@ const CollaborativeWhiteboard = () => {
   };
 
   return (
-    <div className="w-full h-screen bg-gray-100 flex flex-col">
+    <div className="w-full h-screen bg-gray-900 flex flex-col">
       {/* Header */}
-      <div className="bg-white shadow-md p-4 flex items-center justify-between border-b">
+      <div className="bg-gray-800 shadow-md p-4 flex items-center justify-between border-b border-gray-700">
         <div className="flex items-center space-x-4">
-          <h1 className="text-xl font-bold text-gray-800">Collaborative Whiteboard</h1>
-          <div className="flex items-center space-x-2 text-sm text-gray-600">
+          <h1 className="text-xl font-bold text-white">Collaborative Whiteboard</h1>
+          <div className="flex items-center space-x-2 text-sm text-gray-300">
             <Users size={16} />
             <span>{connectedUsers} users</span>
           </div>
@@ -282,15 +281,15 @@ const CollaborativeWhiteboard = () => {
             placeholder="Room ID"
             value={roomId}
             onChange={(e) => setRoomId(e.target.value)}
-            className="px-3 py-1 border rounded text-sm"
+            className="px-3 py-1 border border-gray-600 rounded text-sm bg-gray-700 text-white placeholder-gray-400"
           />
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="bg-white border-b p-3 flex items-center space-x-4">
+      <div className="bg-gray-800 border-b border-gray-700 p-3 flex items-center space-x-4">
         {/* Tools */}
-        <div className="flex items-center space-x-2 border-r pr-4">
+        <div className="flex items-center space-x-2 border-r border-gray-600 pr-4">
           {[
             { name: 'pen', icon: Pen, label: 'Pen' },
             { name: 'rectangle', icon: Square, label: 'Rectangle' },
@@ -302,7 +301,7 @@ const CollaborativeWhiteboard = () => {
               key={name}
               onClick={() => setTool(name)}
               className={`p-2 rounded ${
-                tool === name ? 'bg-blue-500 text-white' : 'text-gray-600 hover:bg-gray-100'
+                tool === name ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
               }`}
               title={label}
             >
@@ -312,25 +311,25 @@ const CollaborativeWhiteboard = () => {
         </div>
 
         {/* Color and Stroke */}
-        <div className="flex items-center space-x-3 border-r pr-4">
+        <div className="flex items-center space-x-3 border-r border-gray-600 pr-4">
           <input
             type="color"
             value={color}
             onChange={(e) => setColor(e.target.value)}
-            className="w-8 h-8 rounded border"
+            className="w-8 h-8 rounded border border-gray-600 bg-gray-700"
             title="Color"
           />
           <div className="flex items-center space-x-2">
-            <label className="text-sm text-gray-600">Stroke:</label>
+            <label className="text-sm text-gray-300">Stroke:</label>
             <input
               type="range"
               min="1"
               max="20"
               value={strokeWidth}
               onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-              className="w-20"
+              className="w-20 accent-blue-600"
             />
-            <span className="text-sm text-gray-600 w-6">{strokeWidth}</span>
+            <span className="text-sm text-gray-300 w-6">{strokeWidth}</span>
           </div>
         </div>
 
@@ -339,7 +338,7 @@ const CollaborativeWhiteboard = () => {
           <button
             onClick={undo}
             disabled={historyIndex <= 0}
-            className="p-2 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+            className="p-2 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Undo"
           >
             <Undo size={18} />
@@ -347,21 +346,21 @@ const CollaborativeWhiteboard = () => {
           <button
             onClick={redo}
             disabled={historyIndex >= history.length - 1}
-            className="p-2 rounded text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+            className="p-2 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Redo"
           >
             <Redo size={18} />
           </button>
           <button
             onClick={clearCanvas}
-            className="p-2 rounded text-red-600 hover:bg-red-50"
+            className="p-2 rounded text-red-400 hover:bg-red-900/20"
             title="Clear Canvas"
           >
             <Trash2 size={18} />
           </button>
           <button
             onClick={downloadSVG}
-            className="p-2 rounded text-green-600 hover:bg-green-50"
+            className="p-2 rounded text-green-400 hover:bg-green-900/20"
             title="Download SVG"
           >
             <Download size={18} />
@@ -375,7 +374,7 @@ const CollaborativeWhiteboard = () => {
           ref={canvasRef}
           width="100%"
           height="100%"
-          className="cursor-crosshair bg-white"
+          className="cursor-crosshair bg-gray-900"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -384,7 +383,7 @@ const CollaborativeWhiteboard = () => {
           {/* Grid pattern */}
           <defs>
             <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#f0f0f0" strokeWidth="0.5"/>
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#374151" strokeWidth="0.5"/>
             </pattern>
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
@@ -396,7 +395,7 @@ const CollaborativeWhiteboard = () => {
         {/* Text input overlay */}
         {textInput.active && (
           <div
-            className="absolute bg-white border rounded shadow-lg p-2"
+            className="absolute bg-gray-800 border border-gray-600 rounded shadow-lg p-2"
             style={{ left: textInput.x, top: textInput.y - 40 }}
           >
             <input
@@ -406,7 +405,7 @@ const CollaborativeWhiteboard = () => {
               onKeyPress={(e) => e.key === 'Enter' && handleTextSubmit()}
               onBlur={handleTextSubmit}
               autoFocus
-              className="border px-2 py-1 text-sm"
+              className="border border-gray-600 px-2 py-1 text-sm bg-gray-700 text-white placeholder-gray-400"
               placeholder="Enter text..."
             />
           </div>
@@ -414,7 +413,7 @@ const CollaborativeWhiteboard = () => {
       </div>
 
       {/* Status bar */}
-      <div className="bg-gray-50 border-t px-4 py-2 text-xs text-gray-500">
+      <div className="bg-gray-800 border-t border-gray-700 px-4 py-2 text-xs text-gray-400">
         Elements: {elements.length} | Tool: {tool} | Room: {roomId}
       </div>
     </div>
