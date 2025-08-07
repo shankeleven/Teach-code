@@ -437,21 +437,25 @@ export default function EditorPage() {
           <button onClick={() => setView("whiteboard")}>Whiteboard</button>
         </div>
         {view === "editor" ? (
-          <Editor
-            socketRef={socketRef}
-            roomId={roomId}
-            onCodeChange={onCodeChange}
-            code={code}
-            theme={theme}
-            language={language}
-          />
+          <div className="editor-content">
+            <Editor
+              socketRef={socketRef}
+              roomId={roomId}
+              onCodeChange={onCodeChange}
+              code={code}
+              theme={theme}
+              language={language}
+            />
+          </div>
         ) : (
-          <CollaborativeWhiteboard
-            socketRef={socketRef}
-            roomId={roomId}
-            elements={whiteboardElements}
-            onElementsChange={onWhiteboardChange}
-          />
+          <div className="whiteboard-content">
+            <CollaborativeWhiteboard
+              socketRef={socketRef}
+              roomId={roomId}
+              elements={whiteboardElements}
+              onElementsChange={onWhiteboardChange}
+            />
+          </div>
         )}
       </div>
     </div>

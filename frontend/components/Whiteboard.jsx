@@ -300,27 +300,11 @@ const CollaborativeWhiteboard = ({
   };
 
   return (
-    <div className="w-full h-screen bg-gray-900 flex flex-col">
-      {/* Header */}
-      <div className="bg-gray-800 shadow-md p-4 flex items-center justify-between border-b border-gray-700">
-        <div className="flex items-center space-x-4">
-          <h1 className="text-xl font-bold text-white">
-            Collaborative Whiteboard
-          </h1>
-          <div className="flex items-center space-x-2 text-sm text-gray-300">
-            <Users size={16} />
-            <span>{connectedUsers} users</span>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span className="text-sm text-gray-300">Room ID: {roomId}</span>
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="bg-gray-800 border-b border-gray-700 p-3 flex items-center space-x-4">
+    <div className="relative w-full h-full">
+      {/* Floating Toolbar */}
+      <div className="absolute top-2 left-2 z-10 bg-gray-800 border border-gray-700 rounded-lg p-2 flex items-center space-x-2 shadow-lg">
         {/* Tools */}
-        <div className="flex items-center space-x-2 border-r border-gray-600 pr-4">
+        <div className="flex items-center space-x-1 border-r border-gray-600 pr-2">
           {[
             { name: "pen", icon: Pen, label: "Pen" },
             { name: "rectangle", icon: Square, label: "Rectangle" },
@@ -331,136 +315,119 @@ const CollaborativeWhiteboard = ({
             <button
               key={name}
               onClick={() => setTool(name)}
-              className={`p-2 rounded ${
+              className={`p-1.5 rounded ${
                 tool === name
                   ? "bg-blue-600 text-white"
                   : "text-gray-300 hover:bg-gray-700"
               }`}
               title={label}
             >
-              <Icon size={18} />
+              <Icon size={14} />
             </button>
           ))}
         </div>
 
         {/* Color and Stroke */}
-        <div className="flex items-center space-x-3 border-r border-gray-600 pr-4">
+        <div className="flex items-center space-x-2 border-r border-gray-600 pr-2">
           <input
             type="color"
             value={color}
             onChange={(e) => setColor(e.target.value)}
-            className="w-8 h-8 rounded border border-gray-600 bg-gray-700"
+            className="w-6 h-6 rounded border border-gray-600 bg-gray-700"
             title="Color"
           />
-          <div className="flex items-center space-x-2">
-            <label className="text-sm text-gray-300">Stroke:</label>
-            <input
-              type="range"
-              min="1"
-              max="20"
-              value={strokeWidth}
-              onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-              className="w-20 accent-blue-600"
-            />
-            <span className="text-sm text-gray-300 w-6">{strokeWidth}</span>
-          </div>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={strokeWidth}
+            onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
+            className="w-16 accent-blue-600"
+            title={`Stroke: ${strokeWidth}`}
+          />
         </div>
 
         {/* Actions */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1">
           <button
             onClick={undo}
             disabled={historyIndex <= 0}
-            className="p-2 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50"
             title="Undo"
           >
-            <Undo size={18} />
+            <Undo size={14} />
           </button>
           <button
             onClick={redo}
             disabled={historyIndex >= history.length - 1}
-            className="p-2 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 rounded text-gray-300 hover:bg-gray-700 disabled:opacity-50"
             title="Redo"
           >
-            <Redo size={18} />
+            <Redo size={14} />
           </button>
           <button
             onClick={clearCanvas}
-            className="p-2 rounded text-red-400 hover:bg-red-900/20"
-            title="Clear Canvas"
+            className="p-1.5 rounded text-red-400 hover:bg-red-900/20"
+            title="Clear"
           >
-            <Trash2 size={18} />
-          </button>
-          <button
-            onClick={downloadSVG}
-            className="p-2 rounded text-green-400 hover:bg-green-900/20"
-            title="Download SVG"
-          >
-            <Download size={18} />
+            <Trash2 size={14} />
           </button>
         </div>
       </div>
 
-      {/* Canvas */}
-      <div className="flex-1 relative overflow-hidden">
-        <svg
-          ref={canvasRef}
-          width="100%"
-          height="100%"
-          className="cursor-crosshair bg-gray-900"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={() => setIsDrawing(false)}
-        >
-          {/* Grid pattern */}
-          <defs>
-            <pattern
-              id="grid"
-              width="20"
-              height="20"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M 20 0 L 0 0 0 20"
-                fill="none"
-                stroke="#374151"
-                strokeWidth="0.5"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-
-          {/* Render all elements */}
-          {renderElements()}
-        </svg>
-
-        {/* Text input overlay */}
-        {textInput.active && (
-          <div
-            className="absolute bg-gray-800 border border-gray-600 rounded shadow-lg p-2"
-            style={{ left: textInput.x, top: textInput.y - 40 }}
+      {/* Full Canvas */}
+      <svg
+        ref={canvasRef}
+        width="100%"
+        height="100vh"
+        className="cursor-crosshair bg-gray-900"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => setIsDrawing(false)}
+      >
+        {/* Grid pattern */}
+        <defs>
+          <pattern
+            id="grid"
+            width="20"
+            height="20"
+            patternUnits="userSpaceOnUse"
           >
-            <input
-              type="text"
-              value={textInput.value}
-              onChange={(e) =>
-                setTextInput((prev) => ({ ...prev, value: e.target.value }))
-              }
-              onKeyPress={(e) => e.key === "Enter" && handleTextSubmit()}
-              onBlur={handleTextSubmit}
-              autoFocus
-              className="border border-gray-600 px-2 py-1 text-sm bg-gray-700 text-white placeholder-gray-400"
-              placeholder="Enter text..."
+            <path
+              d="M 20 0 L 0 0 0 20"
+              fill="none"
+              stroke="#374151"
+              strokeWidth="0.5"
             />
-          </div>
-        )}
-      </div>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#grid)" />
 
-      {/* Status bar */}
-      <div className="bg-gray-800 border-t border-gray-700 px-4 py-2 text-xs text-gray-400">
-        Elements: {elements.length} | Tool: {tool} | Room: {roomId}
-      </div>
+        {/* Render all elements */}
+        {renderElements()}
+      </svg>
+
+      {/* Text input overlay */}
+      {textInput.active && (
+        <div
+          className="absolute bg-gray-800 border border-gray-600 rounded shadow-lg p-2 z-20"
+          style={{ left: textInput.x, top: textInput.y - 40 }}
+        >
+          <input
+            type="text"
+            value={textInput.value}
+            onChange={(e) =>
+              setTextInput((prev) => ({ ...prev, value: e.target.value }))
+            }
+            onKeyPress={(e) => e.key === "Enter" && handleTextSubmit()}
+            onBlur={handleTextSubmit}
+            autoFocus
+            className="border border-gray-600 px-2 py-1 text-sm bg-gray-700 text-white placeholder-gray-400"
+            placeholder="Enter text..."
+          />
+        </div>
+      )}
     </div>
   );
 };
