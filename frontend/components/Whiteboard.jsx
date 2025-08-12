@@ -9,8 +9,25 @@ const CollaborativeWhiteboard = ({
 }) => {
   const canvasRef = useRef(null);
   const [tool, setTool] = useState("pen");
-  const [color, setColor] = useState("#ffffff");
-  const [strokeWidth, setStrokeWidth] = useState(2);
+  const [color, setColor] = useState(() => {
+    if (typeof window === "undefined") return "#ffffff";
+    try {
+      const savedColor = localStorage.getItem("whiteboard:color");
+      return savedColor || "#ffffff";
+    } catch {
+      return "#ffffff";
+    }
+  });
+  const [strokeWidth, setStrokeWidth] = useState(() => {
+    if (typeof window === "undefined") return 2;
+    try {
+      const savedWidth = localStorage.getItem("whiteboard:strokeWidth");
+      const n = Number(savedWidth);
+      return !Number.isNaN(n) && n >= 1 && n <= 20 ? n : 2;
+    } catch {
+      return 2;
+    }
+  });
   // Remove local elements state - use props instead
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -23,6 +40,40 @@ const CollaborativeWhiteboard = ({
   const [action, setAction] = useState("none"); // none | drawing | moving
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [preMoveSnapshot, setPreMoveSnapshot] = useState(null);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("whiteboard:strokeWidth", String(strokeWidth));
+        localStorage.setItem("whiteboard:color", color);
+      }
+    } catch {}
+  }, [strokeWidth, color]);
+
+  // End drawing/moving on global mouseup or when window loses focus
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDrawing || action !== "none") {
+        setIsDrawing(false);
+        setAction("none");
+        setTempElement(null);
+      }
+    };
+    const handleBlur = () => handleGlobalMouseUp();
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [isDrawing, action]);
+
+  // If tool changes mid-draw, cancel drawing and clear preview
+  useEffect(() => {
+    setIsDrawing(false);
+    setAction("none");
+    setTempElement(null);
+  }, [tool]);
 
   // Generate unique ID for elements
   const generateId = () =>
@@ -133,7 +184,9 @@ const CollaborativeWhiteboard = ({
 
   // Handle mouse down
   const handleMouseDown = useCallback(
-  (e) => {
+    (e) => {
+      // Only respond to primary (left) button
+      if (e.button !== 0) return;
       const pos = getMousePos(e);
       setStartPos(pos);
 
@@ -209,8 +262,16 @@ const CollaborativeWhiteboard = ({
 
   // Handle mouse move
   const handleMouseMove = useCallback(
-  (e) => {
+    (e) => {
       const pos = getMousePos(e);
+
+      // If somehow we lost the mouseup (outside svg), stop drawing
+      if (isDrawing && e.buttons !== 1) {
+        setIsDrawing(false);
+        setAction("none");
+        setTempElement(null);
+        return;
+      }
 
       if (action === "moving" && selectedId) {
         const newEls = elements.map((el) => {
@@ -270,7 +331,7 @@ const CollaborativeWhiteboard = ({
 
   // Handle mouse up
   const handleMouseUp = useCallback(
-  (e) => {
+    (e) => {
       const pos = getMousePos(e);
 
       if (action === "moving") {
@@ -538,7 +599,14 @@ const CollaborativeWhiteboard = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={() => setIsDrawing(false)}
+        onMouseLeave={() => {
+          // If the cursor left the canvas, stop active drawing and clear preview
+          if (isDrawing || action === "drawing") {
+            setIsDrawing(false);
+            setAction("none");
+            setTempElement(null);
+          }
+        }}
       >
         {/* Grid pattern */}
         <defs>
