@@ -40,6 +40,7 @@ const CollaborativeWhiteboard = ({
   const [action, setAction] = useState("none"); // none | drawing | moving
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [preMoveSnapshot, setPreMoveSnapshot] = useState(null);
+  const [activeElementId, setActiveElementId] = useState(null);
 
   useEffect(() => {
     try {
@@ -193,18 +194,21 @@ const CollaborativeWhiteboard = ({
       if (tool === "pen") {
         setIsDrawing(true);
         setCurrentPath(`M${pos.x},${pos.y}`);
+        const id = generateId();
         addElement({
           type: "path",
           path: `M${pos.x},${pos.y}`,
           stroke: color,
           strokeWidth,
           fill: "none",
+          id,
         });
+        setActiveElementId(id);
         setAction("drawing");
         return;
       }
 
-      if (tool === "rectangle" || tool === "circle") {
+  if (tool === "rectangle" || tool === "circle") {
         setIsDrawing(true);
         setAction("drawing");
         setTempElement({
@@ -226,15 +230,18 @@ const CollaborativeWhiteboard = ({
       if (tool === "eraser" || tool === "select") {
         const hit = hitTest(pos);
         if (tool === "eraser") {
-          if (hit) {
-            onElementsChange(elements.filter((el) => el.id !== hit.id));
-            // record history
-            setHistory((prev) => [
-              ...prev.slice(0, historyIndex + 1),
-              elements.filter((el) => el.id !== hit.id),
-            ]);
-            setHistoryIndex((prev) => prev + 1);
-          }
+          // Start an eraser stroke path (acts like pen but used in mask)
+          setIsDrawing(true);
+          setCurrentPath(`M${pos.x},${pos.y}`);
+          const id = generateId();
+          addElement({
+            type: "eraser",
+            path: `M${pos.x},${pos.y}`,
+            strokeWidth,
+            id,
+          });
+          setActiveElementId(id);
+          setAction("drawing");
           return;
         }
         if (hit) {
@@ -265,14 +272,6 @@ const CollaborativeWhiteboard = ({
     (e) => {
       const pos = getMousePos(e);
 
-      // If somehow we lost the mouseup (outside svg), stop drawing
-      if (isDrawing && e.buttons !== 1) {
-        setIsDrawing(false);
-        setAction("none");
-        setTempElement(null);
-        return;
-      }
-
       if (action === "moving" && selectedId) {
         const newEls = elements.map((el) => {
           if (el.id !== selectedId) return el;
@@ -301,11 +300,17 @@ const CollaborativeWhiteboard = ({
         const newPath = currentPath + ` L${pos.x},${pos.y}`;
         setCurrentPath(newPath);
 
-        // Update the last element
-        const newElements = [...elements];
-        if (newElements.length > 0) {
-          newElements[newElements.length - 1].path = newPath;
-          onElementsChange(newElements);
+        if (activeElementId) {
+          updateElement(activeElementId, { path: newPath });
+        }
+        return;
+      }
+
+      if (tool === "eraser") {
+        const newPath = currentPath + ` L${pos.x},${pos.y}`;
+        setCurrentPath(newPath);
+        if (activeElementId) {
+          updateElement(activeElementId, { path: newPath });
         }
         return;
       }
@@ -348,7 +353,7 @@ const CollaborativeWhiteboard = ({
       setIsDrawing(false);
       setAction("none");
 
-      if (tool === "rectangle") {
+  if (tool === "rectangle") {
         const rect = {
           type: "rect",
           x: Math.min(startPos.x, pos.x),
@@ -376,9 +381,12 @@ const CollaborativeWhiteboard = ({
         };
         addElement(circle);
         setTempElement(null);
+      } else if (tool === "eraser") {
+        // eraser stroke already updated during move; nothing else to do
       }
+    setActiveElementId(null);
     },
-  [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement, action, elements, historyIndex]
+  [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement, action, elements, historyIndex, activeElementId, updateElement]
   );
 
   // Text feature removed
@@ -410,11 +418,19 @@ const CollaborativeWhiteboard = ({
 
   // Generate SVG string for storage/export
   const generateSVG = () => {
-    const svgElements = elements
+    const drawEls = elements.filter((el) => el.type !== "eraser");
+    const erasers = elements.filter((el) => el.type === "eraser");
+    const maskPaths = erasers
+      .map(
+        (e) => `<path d="${e.path}" stroke="black" stroke-width="${e.strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`
+      )
+      .join("\n      ");
+
+    const content = drawEls
       .map((el) => {
         switch (el.type) {
           case "path":
-            return `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+            return `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" stroke-linecap="round" stroke-linejoin="round" />`;
           case "rect":
             return `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
           case "circle":
@@ -425,10 +441,18 @@ const CollaborativeWhiteboard = ({
             return "";
         }
       })
-      .join("\n    ");
+      .join("\n      ");
 
     return `<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
-    ${svgElements}
+    <defs>
+      <mask id="eraseMask" maskUnits="userSpaceOnUse">
+        <rect width="800" height="600" fill="white" />
+        ${maskPaths}
+      </mask>
+    </defs>
+    <g mask="url(#eraseMask)">
+      ${content}
+    </g>
   </svg>`;
   };
 
@@ -463,6 +487,8 @@ const CollaborativeWhiteboard = ({
               opacity={selectedId === el.id ? 0.9 : 1}
             />
           );
+        case "eraser":
+          return null; // not drawn directly; handled via mask
         case "rect":
           return (
             <rect
@@ -591,7 +617,7 @@ const CollaborativeWhiteboard = ({
       </div>
 
       {/* Full Canvas */}
-      <svg
+  <svg
         ref={canvasRef}
         width="100%"
         height="100vh"
@@ -599,12 +625,13 @@ const CollaborativeWhiteboard = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={() => {
+    onMouseLeave={() => {
           // If the cursor left the canvas, stop active drawing and clear preview
           if (isDrawing || action === "drawing") {
             setIsDrawing(false);
             setAction("none");
             setTempElement(null);
+      setActiveElementId(null);
           }
         }}
       >
@@ -626,8 +653,28 @@ const CollaborativeWhiteboard = ({
         </defs>
         <rect width="100%" height="100%" fill="url(#grid)" />
 
-        {/* Render all elements */}
-        {renderElements()}
+        {/* Eraser mask and elements */}
+        <defs>
+          <mask id="eraseMaskSvg" maskUnits="userSpaceOnUse">
+            <rect width="100%" height="100%" fill="white" />
+            {elements
+              .filter((el) => el.type === "eraser")
+              .map((e) => (
+                <path
+                  key={e.id}
+                  d={e.path}
+                  stroke="black"
+                  strokeWidth={e.strokeWidth}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+          </mask>
+        </defs>
+
+        {/* Render all drawing elements under mask */}
+        <g mask="url(#eraseMaskSvg)">{renderElements()}</g>
 
         {/* Selection highlight */}
         {selectedId &&
