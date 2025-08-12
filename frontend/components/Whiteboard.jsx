@@ -1,16 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  Pen,
-  Eraser,
-  Square,
-  Circle,
-  Type,
-  Undo,
-  Redo,
-  Download,
-  Users,
-  Trash2,
-} from "lucide-react";
+import { Pen, Eraser, Square, Circle, Undo, Redo, Trash2, MousePointer } from "lucide-react";
 
 const CollaborativeWhiteboard = ({
   socketRef,
@@ -29,12 +18,11 @@ const CollaborativeWhiteboard = ({
   const [currentPath, setCurrentPath] = useState("");
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [connectedUsers, setConnectedUsers] = useState(3);
-  const [textInput, setTextInput] = useState({
-    active: false,
-    x: 0,
-    y: 0,
-    value: "",
-  });
+  const [tempElement, setTempElement] = useState(null); // preview while drawing
+  const [selectedId, setSelectedId] = useState(null);
+  const [action, setAction] = useState("none"); // none | drawing | moving
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [preMoveSnapshot, setPreMoveSnapshot] = useState(null);
 
   // Generate unique ID for elements
   const generateId = () =>
@@ -78,14 +66,79 @@ const CollaborativeWhiteboard = ({
     };
   }, []);
 
+  // Simple hit test for select/erase/move (checks from top-most)
+  const hitTest = useCallback(
+    (point) => {
+      for (let i = elements.length - 1; i >= 0; i--) {
+        const el = elements[i];
+        if (el.type === "rect") {
+          if (
+            point.x >= el.x &&
+            point.x <= el.x + el.width &&
+            point.y >= el.y &&
+            point.y <= el.y + el.height
+          ) {
+            return el;
+          }
+        } else if (el.type === "circle") {
+          const dx = point.x - el.cx;
+          const dy = point.y - el.cy;
+          if (Math.sqrt(dx * dx + dy * dy) <= el.r) return el;
+        } else if (el.type === "text") {
+          const fontSize = el.fontSize || 16;
+          const width = (el.text?.length || 0) * fontSize * 0.6;
+          const height = fontSize * 1.2;
+          if (
+            point.x >= el.x &&
+            point.x <= el.x + width &&
+            point.y >= el.y - height &&
+            point.y <= el.y
+          ) {
+            return el;
+          }
+        } else if (el.type === "path") {
+          // crude path hit test: bounding box only for performance
+          try {
+            const coords = el.path
+              .replace(/[ML]/g, "")
+              .trim()
+              .split(" ")
+              .map((p) => p.split(",").map(Number));
+            let minX = Infinity,
+              minY = Infinity,
+              maxX = -Infinity,
+              maxY = -Infinity;
+            coords.forEach(([x, y]) => {
+              if (!isNaN(x) && !isNaN(y)) {
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+              }
+            });
+            if (
+              point.x >= minX - 4 &&
+              point.x <= maxX + 4 &&
+              point.y >= minY - 4 &&
+              point.y <= maxY + 4
+            )
+              return el;
+          } catch {}
+        }
+      }
+      return null;
+    },
+    [elements]
+  );
+
   // Handle mouse down
   const handleMouseDown = useCallback(
-    (e) => {
+  (e) => {
       const pos = getMousePos(e);
-      setIsDrawing(true);
       setStartPos(pos);
 
       if (tool === "pen") {
+        setIsDrawing(true);
         setCurrentPath(`M${pos.x},${pos.y}`);
         addElement({
           type: "path",
@@ -94,19 +147,94 @@ const CollaborativeWhiteboard = ({
           strokeWidth,
           fill: "none",
         });
-      } else if (tool === "text") {
-        setTextInput({ active: true, x: pos.x, y: pos.y, value: "" });
+        setAction("drawing");
+        return;
+      }
+
+      if (tool === "rectangle" || tool === "circle") {
+        setIsDrawing(true);
+        setAction("drawing");
+        setTempElement({
+          type: tool === "rectangle" ? "rect" : "circle",
+          x: pos.x,
+          y: pos.y,
+          cx: pos.x,
+          cy: pos.y,
+          width: 0,
+          height: 0,
+          r: 0,
+          stroke: color,
+          strokeWidth,
+          fill: "none",
+        });
+        return;
+      }
+
+      if (tool === "eraser" || tool === "select") {
+        const hit = hitTest(pos);
+        if (tool === "eraser") {
+          if (hit) {
+            onElementsChange(elements.filter((el) => el.id !== hit.id));
+            // record history
+            setHistory((prev) => [
+              ...prev.slice(0, historyIndex + 1),
+              elements.filter((el) => el.id !== hit.id),
+            ]);
+            setHistoryIndex((prev) => prev + 1);
+          }
+          return;
+        }
+        if (hit) {
+          setSelectedId(hit.id);
+          setAction("moving");
+          // save snapshot for history on mouseup
+          setPreMoveSnapshot(elements);
+          if (hit.type === "rect") {
+            setDragOffset({ x: pos.x - hit.x, y: pos.y - hit.y });
+          } else if (hit.type === "circle") {
+            setDragOffset({ x: pos.x - hit.cx, y: pos.y - hit.cy });
+          } else if (hit.type === "text") {
+            setDragOffset({ x: pos.x - hit.x, y: pos.y - hit.y });
+          } else if (hit.type === "path") {
+            setDragOffset({ x: pos.x, y: pos.y });
+          }
+        } else {
+          setSelectedId(null);
+        }
+        return;
       }
     },
-    [tool, color, strokeWidth, getMousePos, addElement]
+  [tool, color, strokeWidth, getMousePos, addElement, hitTest, elements, onElementsChange, historyIndex]
   );
 
   // Handle mouse move
   const handleMouseMove = useCallback(
-    (e) => {
-      if (!isDrawing) return;
-
+  (e) => {
       const pos = getMousePos(e);
+
+      if (action === "moving" && selectedId) {
+        const newEls = elements.map((el) => {
+          if (el.id !== selectedId) return el;
+          if (el.type === "rect") {
+            return { ...el, x: pos.x - dragOffset.x, y: pos.y - dragOffset.y };
+          }
+          if (el.type === "circle") {
+            return { ...el, cx: pos.x - dragOffset.x, cy: pos.y - dragOffset.y };
+          }
+          if (el.type === "text") {
+            return { ...el, x: pos.x - dragOffset.x, y: pos.y - dragOffset.y };
+          }
+          if (el.type === "path") {
+            // translate path by delta from last move event (approximate: recompute from start)
+            return el; // skipping complex path move for now
+          }
+          return el;
+        });
+        onElementsChange(newEls);
+        return;
+      }
+
+      if (!isDrawing) return;
 
       if (tool === "pen") {
         const newPath = currentPath + ` L${pos.x},${pos.y}`;
@@ -118,21 +246,49 @@ const CollaborativeWhiteboard = ({
           newElements[newElements.length - 1].path = newPath;
           onElementsChange(newElements);
         }
+        return;
+      }
+
+      if (tool === "rectangle" && tempElement) {
+        const x = Math.min(startPos.x, pos.x);
+        const y = Math.min(startPos.y, pos.y);
+        const width = Math.abs(pos.x - startPos.x);
+        const height = Math.abs(pos.y - startPos.y);
+        setTempElement((t) => ({ ...t, type: "rect", x, y, width, height }));
+        return;
+      }
+      if (tool === "circle" && tempElement) {
+        const r = Math.sqrt(
+          Math.pow(pos.x - startPos.x, 2) + Math.pow(pos.y - startPos.y, 2)
+        );
+        setTempElement((t) => ({ ...t, type: "circle", cx: startPos.x, cy: startPos.y, r }));
+        return;
       }
     },
-    [isDrawing, tool, currentPath, getMousePos]
+  [isDrawing, tool, currentPath, getMousePos, tempElement, startPos, selectedId, elements, dragOffset, action, onElementsChange]
   );
 
   // Handle mouse up
   const handleMouseUp = useCallback(
-    (e) => {
-      if (!isDrawing) return;
-
+  (e) => {
       const pos = getMousePos(e);
+
+      if (action === "moving") {
+        setAction("none");
+        setSelectedId((id) => id);
+        // push to history
+        setHistory((prev) => [...prev.slice(0, historyIndex + 1), elements]);
+        setHistoryIndex((prev) => prev + 1);
+        setPreMoveSnapshot(null);
+        return;
+      }
+
+      if (!isDrawing) return;
       setIsDrawing(false);
+      setAction("none");
 
       if (tool === "rectangle") {
-        addElement({
+        const rect = {
           type: "rect",
           x: Math.min(startPos.x, pos.x),
           y: Math.min(startPos.y, pos.y),
@@ -141,12 +297,14 @@ const CollaborativeWhiteboard = ({
           stroke: color,
           strokeWidth,
           fill: "none",
-        });
+        };
+        addElement(rect);
+        setTempElement(null);
       } else if (tool === "circle") {
         const radius = Math.sqrt(
           Math.pow(pos.x - startPos.x, 2) + Math.pow(pos.y - startPos.y, 2)
         );
-        addElement({
+        const circle = {
           type: "circle",
           cx: startPos.x,
           cy: startPos.y,
@@ -154,27 +312,15 @@ const CollaborativeWhiteboard = ({
           stroke: color,
           strokeWidth,
           fill: "none",
-        });
+        };
+        addElement(circle);
+        setTempElement(null);
       }
     },
-    [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement]
+  [isDrawing, tool, startPos, color, strokeWidth, getMousePos, addElement, action, elements, historyIndex]
   );
 
-  // Handle text input
-  const handleTextSubmit = () => {
-    if (textInput.value.trim()) {
-      addElement({
-        type: "text",
-        x: textInput.x,
-        y: textInput.y,
-        text: textInput.value,
-        fill: color,
-        fontSize: 16,
-        fontFamily: "Arial, sans-serif",
-      });
-    }
-    setTextInput({ active: false, x: 0, y: 0, value: "" });
-  };
+  // Text feature removed
 
   // Undo last action
   const undo = useCallback(() => {
@@ -253,6 +399,7 @@ const CollaborativeWhiteboard = ({
               fill={el.fill}
               strokeLinecap="round"
               strokeLinejoin="round"
+              opacity={selectedId === el.id ? 0.9 : 1}
             />
           );
         case "rect":
@@ -266,6 +413,8 @@ const CollaborativeWhiteboard = ({
               stroke={el.stroke}
               strokeWidth={el.strokeWidth}
               fill={el.fill}
+              style={{ cursor: tool === "select" ? "move" : "inherit" }}
+              opacity={selectedId === el.id ? 0.95 : 1}
             />
           );
         case "circle":
@@ -278,6 +427,8 @@ const CollaborativeWhiteboard = ({
               stroke={el.stroke}
               strokeWidth={el.strokeWidth}
               fill={el.fill}
+              style={{ cursor: tool === "select" ? "move" : "inherit" }}
+              opacity={selectedId === el.id ? 0.95 : 1}
             />
           );
         case "text":
@@ -289,6 +440,7 @@ const CollaborativeWhiteboard = ({
               fill={el.fill}
               fontSize={el.fontSize}
               fontFamily={el.fontFamily}
+              style={{ cursor: tool === "select" ? "move" : "text" }}
             >
               {el.text}
             </text>
@@ -299,17 +451,19 @@ const CollaborativeWhiteboard = ({
     });
   };
 
+  // Text feature removed
+
   return (
     <div className="relative w-full h-full">
       {/* Floating Toolbar */}
-      <div className="absolute top-2 left-2 z-10 bg-gray-800 border border-gray-700 rounded-lg p-2 flex items-center space-x-2 shadow-lg">
+  <div className="absolute top-2 left-2 z-10 bg-gray-800 border border-gray-700 rounded-lg p-2 flex items-center space-x-2 shadow-lg">
         {/* Tools */}
         <div className="flex items-center space-x-1 border-r border-gray-600 pr-2">
           {[
+            { name: "select", icon: MousePointer, label: "Select/Move" },
             { name: "pen", icon: Pen, label: "Pen" },
             { name: "rectangle", icon: Square, label: "Rectangle" },
             { name: "circle", icon: Circle, label: "Circle" },
-            { name: "text", icon: Type, label: "Text" },
             { name: "eraser", icon: Eraser, label: "Eraser" },
           ].map(({ name, icon: Icon, label }) => (
             <button
@@ -380,7 +534,7 @@ const CollaborativeWhiteboard = ({
         ref={canvasRef}
         width="100%"
         height="100vh"
-        className="cursor-crosshair bg-gray-900"
+        className={`bg-gray-900 ${tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -406,28 +560,90 @@ const CollaborativeWhiteboard = ({
 
         {/* Render all elements */}
         {renderElements()}
+
+        {/* Selection highlight */}
+        {selectedId &&
+          (() => {
+            const sel = elements.find((el) => el.id === selectedId);
+            if (!sel) return null;
+            if (sel.type === "rect") {
+              return (
+                <rect
+                  x={sel.x - 2}
+                  y={sel.y - 2}
+                  width={sel.width + 4}
+                  height={sel.height + 4}
+                  stroke="#60a5fa"
+                  strokeWidth={1}
+                  fill="none"
+                  strokeDasharray="4 2"
+                  pointerEvents="none"
+                />
+              );
+            }
+            if (sel.type === "circle") {
+              return (
+                <circle
+                  cx={sel.cx}
+                  cy={sel.cy}
+                  r={sel.r + 3}
+                  stroke="#60a5fa"
+                  strokeWidth={1}
+                  fill="none"
+                  strokeDasharray="4 2"
+                  pointerEvents="none"
+                />
+              );
+            }
+            if (sel.type === "text") {
+              const fontSize = sel.fontSize || 16;
+              const width = (sel.text?.length || 0) * fontSize * 0.6;
+              const height = fontSize * 1.2;
+              return (
+                <rect
+                  x={sel.x - 2}
+                  y={sel.y - height - 2}
+                  width={width + 4}
+                  height={height + 4}
+                  stroke="#60a5fa"
+                  strokeWidth={1}
+                  fill="none"
+                  strokeDasharray="4 2"
+                  pointerEvents="none"
+                />
+              );
+            }
+            return null;
+          })()}
+
+        {/* Temp element preview while drawing */}
+        {tempElement && tempElement.type === "rect" && (
+          <rect
+            x={tempElement.x}
+            y={tempElement.y}
+            width={tempElement.width}
+            height={tempElement.height}
+            stroke={tempElement.stroke}
+            strokeWidth={tempElement.strokeWidth}
+            fill="rgba(59,130,246,0.08)"
+            strokeDasharray="4 2"
+          />
+        )}
+        {tempElement && tempElement.type === "circle" && (
+          <circle
+            cx={tempElement.cx}
+            cy={tempElement.cy}
+            r={tempElement.r}
+            stroke={tempElement.stroke}
+            strokeWidth={tempElement.strokeWidth}
+            fill="rgba(59,130,246,0.08)"
+            strokeDasharray="4 2"
+          />
+        )}
       </svg>
 
       {/* Text input overlay */}
-      {textInput.active && (
-        <div
-          className="absolute bg-gray-800 border border-gray-600 rounded shadow-lg p-2 z-20"
-          style={{ left: textInput.x, top: textInput.y - 40 }}
-        >
-          <input
-            type="text"
-            value={textInput.value}
-            onChange={(e) =>
-              setTextInput((prev) => ({ ...prev, value: e.target.value }))
-            }
-            onKeyPress={(e) => e.key === "Enter" && handleTextSubmit()}
-            onBlur={handleTextSubmit}
-            autoFocus
-            className="border border-gray-600 px-2 py-1 text-sm bg-gray-700 text-white placeholder-gray-400"
-            placeholder="Enter text..."
-          />
-        </div>
-      )}
+  {/* Text feature removed */}
     </div>
   );
 };
