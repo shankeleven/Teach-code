@@ -422,7 +422,7 @@ export default function EditorPage() {
           </select>
         </div>
         <button className="btn micBtn" onClick={toggleMute}>
-          {isMuted ? "Mic Off" : "Mic On"}
+          <img src={isMuted ? "/mic-off.svg" : "/mic.svg"} alt="mic" />
         </button>
         <button className="btn copyBtn" onClick={copyRoomId}>
           Copy ROOM ID
@@ -432,9 +432,19 @@ export default function EditorPage() {
         </button>
       </div>
       <div className="editorWrap">
-        <div className="toggle-buttons">
-          <button onClick={() => setView("editor")}>Editor</button>
-          <button onClick={() => setView("whiteboard")}>Whiteboard</button>
+        <div className="toggle-container">
+          <button
+            className={`toggle-btn ${view === "editor" ? "active" : ""}`}
+            onClick={() => setView("editor")}
+          >
+            Editor
+          </button>
+          <button
+            className={`toggle-btn ${view === "whiteboard" ? "active" : ""}`}
+            onClick={() => setView("whiteboard")}
+          >
+            Whiteboard
+          </button>
         </div>
         {view === "editor" ? (
           <div className="editor-content">

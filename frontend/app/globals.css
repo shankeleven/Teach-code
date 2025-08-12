@@ -193,32 +193,32 @@ footer a:hover {
   flex: 1;
 }
 
-.toggle-buttons {
+.toggle-container {
   display: flex;
-  gap: 10px;
+  justify-content: center;
   padding: 10px;
   background: #282a36;
   border-bottom: 1px solid #424242;
-  flex-shrink: 0;
 }
 
-.toggle-buttons button {
-  padding: 8px 16px;
+.toggle-btn {
+  background: #282a36;
   border: none;
-  border-radius: 5px;
-  background: #4aed88;
-  color: #282a36;
-  font-weight: bold;
+  color: #fff;
+  padding: 10px 20px;
   cursor: pointer;
+  font-weight: bold;
   transition: all 0.3s ease-in-out;
+  box-shadow: 5px 5px 10px #1c1e29, -5px -5px 10px #343843;
+  border-radius: 10px;
 }
 
-.toggle-buttons button:hover {
-  background: #00f7ff;
+.toggle-btn.active {
+  box-shadow: inset 5px 5px 10px #1c1e29, inset -5px -5px 10px #343843;
+  color: #00f7ff;
 }
 
-.editor-content,
-.whiteboard-content {
-  flex: 1;
-  overflow: hidden;
+.toggle-btn:first-child {
+  margin-right: 10px;
 }
+
