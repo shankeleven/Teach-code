@@ -418,41 +418,52 @@ const CollaborativeWhiteboard = ({
 
   // Generate SVG string for storage/export
   const generateSVG = () => {
-    const drawEls = elements.filter((el) => el.type !== "eraser");
-    const erasers = elements.filter((el) => el.type === "eraser");
-    const maskPaths = erasers
-      .map(
-        (e) => `<path d="${e.path}" stroke="black" stroke-width="${e.strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`
-      )
-      .join("\n      ");
-
-    const content = drawEls
-      .map((el) => {
-        switch (el.type) {
-          case "path":
-            return `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" stroke-linecap="round" stroke-linejoin="round" />`;
-          case "rect":
-            return `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
-          case "circle":
-            return `<circle cx="${el.cx}" cy="${el.cy}" r="${el.r}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
-          case "text":
-            return `<text x="${el.x}" y="${el.y}" fill="${el.fill}" font-size="${el.fontSize}" font-family="${el.fontFamily}">${el.text}</text>`;
-          default:
-            return "";
-        }
-      })
-      .join("\n      ");
-
-    return `<svg width="800" height="600" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <mask id="eraseMask" maskUnits="userSpaceOnUse">
-        <rect width="800" height="600" fill="white" />
+    // Build per-element masks so that erasers only affect elements that came before them
+    const defs = [];
+    const body = [];
+    elements.forEach((el, idx) => {
+      if (el.type === "eraser") return; // not drawn directly
+      const erasersAfter = elements.filter((e, j) => e.type === "eraser" && j > idx);
+      const maskId = erasersAfter.length ? `eraseMask_${idx}` : null;
+      if (maskId) {
+        const maskPaths = erasersAfter
+          .map(
+            (e) => `<path d="${e.path}" stroke="black" stroke-width="${e.strokeWidth}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`
+          )
+          .join("\n        ");
+        defs.push(`
+      <mask id="${maskId}" maskUnits="userSpaceOnUse">
+        <rect x="-100000" y="-100000" width="200000" height="200000" fill="white" />
         ${maskPaths}
-      </mask>
+      </mask>`);
+      }
+      let node = "";
+      switch (el.type) {
+        case "path":
+          node = `<path d="${el.path}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" stroke-linecap="round" stroke-linejoin="round" />`;
+          break;
+        case "rect":
+          node = `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+          break;
+        case "circle":
+          node = `<circle cx="${el.cx}" cy="${el.cy}" r="${el.r}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}" />`;
+          break;
+        case "text":
+          node = `<text x="${el.x}" y="${el.y}" fill="${el.fill}" font-size="${el.fontSize}" font-family="${el.fontFamily}">${el.text}</text>`;
+          break;
+        default:
+          node = "";
+      }
+      if (node) {
+        body.push(maskId ? `<g mask="url(#${maskId})">${node}</g>` : node);
+      }
+    });
+
+    return `<svg xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      ${defs.join("\n")} 
     </defs>
-    <g mask="url(#eraseMask)">
-      ${content}
-    </g>
+    ${body.join("\n    ")}
   </svg>`;
   };
 
@@ -672,9 +683,110 @@ const CollaborativeWhiteboard = ({
               ))}
           </mask>
         </defs>
+          {/* Per-element eraser masks: mask each element with erasers that came AFTER it */}
+          <defs>
+            {elements.map((el, idx) => {
+              if (el.type === "eraser") return null;
+              const erasersAfter = elements.filter((e, j) => e.type === "eraser" && j > idx);
+              if (erasersAfter.length === 0) return null;
+              const maskId = `eraseMaskSvg_${idx}`;
+              return (
+                <mask id={maskId} maskUnits="userSpaceOnUse" key={maskId}>
+                  <rect x="-100000" y="-100000" width="200000" height="200000" fill="white" />
+                  {erasersAfter.map((e) => (
+                    <path
+                      key={`${maskId}_${e.id}`}
+                      d={e.path}
+                      stroke="black"
+                      strokeWidth={e.strokeWidth}
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  ))}
+                </mask>
+              );
+            })}
+          </defs>
 
-        {/* Render all drawing elements under mask */}
-        <g mask="url(#eraseMaskSvg)">{renderElements()}</g>
+          {/* Render all drawing elements with per-element masks */}
+          {elements.map((el, idx) => {
+            if (el.type === "eraser") return null;
+            const hasMask = elements.some((e, j) => e.type === "eraser" && j > idx);
+            const maskId = hasMask ? `eraseMaskSvg_${idx}` : null;
+            switch (el.type) {
+              case "path": {
+                const node = (
+                  <path
+                    d={el.path}
+                    stroke={el.stroke}
+                    strokeWidth={el.strokeWidth}
+                    fill={el.fill}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={selectedId === el.id ? 0.9 : 1}
+                  />
+                );
+                return (
+                  <g key={el.id} mask={maskId ? `url(#${maskId})` : undefined}>{node}</g>
+                );
+              }
+              case "rect": {
+                const node = (
+                  <rect
+                    x={el.x}
+                    y={el.y}
+                    width={el.width}
+                    height={el.height}
+                    stroke={el.stroke}
+                    strokeWidth={el.strokeWidth}
+                    fill={el.fill}
+                    style={{ cursor: tool === "select" ? "move" : "inherit" }}
+                    opacity={selectedId === el.id ? 0.95 : 1}
+                  />
+                );
+                return (
+                  <g key={el.id} mask={maskId ? `url(#${maskId})` : undefined}>{node}</g>
+                );
+              }
+              case "circle": {
+                const node = (
+                  <circle
+                    cx={el.cx}
+                    cy={el.cy}
+                    r={el.r}
+                    stroke={el.stroke}
+                    strokeWidth={el.strokeWidth}
+                    fill={el.fill}
+                    style={{ cursor: tool === "select" ? "move" : "inherit" }}
+                    opacity={selectedId === el.id ? 0.95 : 1}
+                  />
+                );
+                return (
+                  <g key={el.id} mask={maskId ? `url(#${maskId})` : undefined}>{node}</g>
+                );
+              }
+              case "text": {
+                const node = (
+                  <text
+                    x={el.x}
+                    y={el.y}
+                    fill={el.fill}
+                    fontSize={el.fontSize}
+                    fontFamily={el.fontFamily}
+                    style={{ cursor: tool === "select" ? "move" : "text" }}
+                  >
+                    {el.text}
+                  </text>
+                );
+                return (
+                  <g key={el.id} mask={maskId ? `url(#${maskId})` : undefined}>{node}</g>
+                );
+              }
+              default:
+                return null;
+            }
+          })}
 
         {/* Selection highlight */}
         {selectedId &&
@@ -732,28 +844,33 @@ const CollaborativeWhiteboard = ({
           })()}
 
         {/* Temp element preview while drawing */}
-        {tempElement && tempElement.type === "rect" && (
-          <rect
-            x={tempElement.x}
-            y={tempElement.y}
-            width={tempElement.width}
-            height={tempElement.height}
-            stroke={tempElement.stroke}
-            strokeWidth={tempElement.strokeWidth}
-            fill="rgba(59,130,246,0.08)"
-            strokeDasharray="4 2"
-          />
-        )}
-        {tempElement && tempElement.type === "circle" && (
-          <circle
-            cx={tempElement.cx}
-            cy={tempElement.cy}
-            r={tempElement.r}
-            stroke={tempElement.stroke}
-            strokeWidth={tempElement.strokeWidth}
-            fill="rgba(59,130,246,0.08)"
-            strokeDasharray="4 2"
-          />
+        {tempElement && (
+          tempElement.type === "rect" ? (
+            <rect
+              x={tempElement.x}
+              y={tempElement.y}
+              width={tempElement.width}
+              height={tempElement.height}
+              stroke={tempElement.stroke}
+              strokeWidth={tempElement.strokeWidth}
+              fill="none"
+              strokeDasharray="4 2"
+              opacity={0.8}
+              pointerEvents="none"
+            />
+          ) : tempElement.type === "circle" ? (
+            <circle
+              cx={tempElement.cx}
+              cy={tempElement.cy}
+              r={tempElement.r}
+              stroke={tempElement.stroke}
+              strokeWidth={tempElement.strokeWidth}
+              fill="none"
+              strokeDasharray="4 2"
+              opacity={0.8}
+              pointerEvents="none"
+            />
+          ) : null
         )}
       </svg>
 
